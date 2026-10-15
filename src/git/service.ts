@@ -1,0 +1,321 @@
+import { readFile, writeFile, mkdir, stat, lstat, realpath, unlink, readdir } from 'node:fs/promises';
+import { resolve, relative, dirname, join, isAbsolute, sep } from 'node:path';
+import { randomUUID, createHash } from 'node:crypto';
+import { createTwoFilesPatch } from 'diff';
+import { GitError, GitRunner } from './runner';
+import { LOG_FORMAT, commitFromFields, parseBlame, parseHistory, parseHunks, parseLog, parseStatus, conflictBlocks } from './parsers';
+import { lineChange } from './line-change';
+import { EMPTY, HEAD, INDEX, WORKTREE, type Backup, type BlameLine, type BlameChange, type ChangedFile, type Commit, type Conflict, type FileContent, type FileDiff, type GitRef, type LogFilter, type Operation, type Repository, type RepoStatus, type Revision, type Stash } from '../types';
+
+const MAX_TEXT = 2 * 1024 * 1024;
+const missing = (): FileContent => ({ text: '', size: 0, binary: false, large: false, exists: false });
+function content(bytes: Buffer, size = bytes.length): FileContent {
+  let binary = bytes.subarray(0, 8192).includes(0); const large = size > MAX_TEXT;
+  if (!binary && !large) try { new TextDecoder('utf-8', { fatal: true }).decode(bytes); } catch { binary = true; }
+  return { text: binary || large ? '' : bytes.toString('utf8'), size, binary, large, exists: true };
+}
+export class GitService {
+  runner: GitRunner;
+  repo?: Repository;
+  constructor(public vault: string, executable = 'git') { this.runner = new GitRunner(executable, vault); }
+  async discover(): Promise<Repository | undefined> {
+    const version = (await this.runner.text(['--version'])).trim();
+    const m = /(\d+)\.(\d+)/.exec(version); if (!m || +m[1] < 2 || (+m[1] === 2 && +m[2] < 30)) throw new Error('Git Plus 需要 Git 2.30 或以上版本');
+    try {
+      const root = (await this.runner.text(['rev-parse', '--show-toplevel'])).trim();
+      const gitDir = (await this.runner.text(['rev-parse', '--absolute-git-dir'])).trim();
+      const commonDir = resolve(this.vault, (await this.runner.text(['rev-parse', '--git-common-dir'])).trim());
+      this.repo = { root, gitDir, commonDir, vaultPrefix: relative(root, this.vault).split(sep).join('/'), gitVersion: version };
+      this.runner.cwd = root; this.runner.commonDir = commonDir; return this.repo;
+    } catch (e) { if (e instanceof GitError && /not a git repository/.test(e.message)) return undefined; throw e; }
+  }
+  root(): string { if (!this.repo) throw new Error('当前笔记库不属于 Git 仓库，请先初始化'); return this.repo.root; }
+  path(path: string): string {
+    if (!path || path.includes('\0') || isAbsolute(path)) throw new Error('无效的仓库相对路径');
+    const absolute = resolve(this.root(), path); const rel = relative(this.root(), absolute);
+    if (rel === '..' || rel.startsWith('..' + sep) || isAbsolute(rel) || rel.split(sep)[0].toLowerCase() === '.git') throw new Error('路径超出仓库范围');
+    return absolute;
+  }
+  repoPath(vaultPath: string): string { return [this.repo?.vaultPrefix, vaultPath].filter(Boolean).join('/'); }
+  vaultPath(repoPath: string): string | undefined {
+    const prefix = this.repo?.vaultPrefix; if (!prefix) return repoPath;
+    return repoPath.startsWith(prefix + '/') ? repoPath.slice(prefix.length + 1) : undefined;
+  }
+  async writablePath(path: string): Promise<string> {
+    const absolute = this.path(path); let parent = dirname(absolute);
+    while (true) { try { const actual = await realpath(parent); const rel = relative(await realpath(this.root()), actual); if (rel === '..' || rel.startsWith('..' + sep) || isAbsolute(rel)) throw new Error('符号链接指向仓库外部，不能写入'); break; } catch (e) { if ((e as NodeJS.ErrnoException).code !== 'ENOENT') throw e; parent = dirname(parent); } }
+    const info = await lstat(absolute).catch(e => { if (e.code === 'ENOENT') return undefined; throw e; });
+    if (info && !info.isFile()) throw new Error('此操作只支持普通文件，不能覆盖目录或符号链接');
+    return absolute;
+  }
+  async init(): Promise<void> {
+    if (this.repo) throw new Error('已存在 Git 仓库');
+    await this.runner.write(() => this.runner.text(['init', '--initial-branch=main'])); await this.discover();
+  }
+  private async pathsCommand(prefix: string[], paths: string[]): Promise<void> {
+    let batch: string[] = [], length = 0;
+    for (const path of paths) {
+      if (batch.length && length + path.length > 10000) { await this.runner.text([...prefix, '--', ...batch]); batch = []; length = 0; }
+      batch.push(path); length += path.length + 3;
+    }
+    if (batch.length) await this.runner.text([...prefix, '--', ...batch]);
+  }
+  async status(): Promise<RepoStatus> {
+    this.root(); const result = parseStatus(await this.runner.text(['status', '--porcelain=v2', '--branch', '-z', '--untracked-files=all']));
+    for (const [name, markers] of Object.entries({ rebase: ['rebase-merge', 'rebase-apply'], merge: ['MERGE_HEAD'], 'cherry-pick': ['CHERRY_PICK_HEAD'], revert: ['REVERT_HEAD'] })) {
+      for (const marker of markers) if (await stat(join(this.repo!.gitDir, marker)).then(() => true, () => false)) result.operation = name as Operation;
+    }
+    return result;
+  }
+  async resolveRef(ref: string): Promise<string> {
+    if (!ref || ref.includes('\0') || ref.includes('\n')) throw new Error('无效版本引用');
+    return (await this.runner.text(['rev-parse', '--verify', '--end-of-options', `${ref}^{commit}`])).trim();
+  }
+  async hasHead(): Promise<boolean> { try { await this.resolveRef('HEAD'); return true; } catch (e) { if (e instanceof GitError) return false; throw e; } }
+  async log(filter: LogFilter = {}, skip = 0, limit = 200): Promise<Commit[]> {
+    if (!await this.hasHead()) return [];
+    const args = ['log', '--topo-order', '-z', `--format=${LOG_FORMAT}`, `--max-count=${Math.min(1000, Math.max(1, limit))}`, `--skip=${Math.max(0, skip)}`];
+    if (filter.author) args.push(`--author=${filter.author}`);
+    if (filter.message) args.push('--fixed-strings', `--grep=${filter.message}`);
+    const dateTime = (date: string, end: boolean): number => {
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) throw new Error('日期必须为 YYYY-MM-DD');
+      const value = new Date(`${date}T00:00:00`); if (!Number.isFinite(value.getTime())) throw new Error('日期无效');
+      if (end) value.setDate(value.getDate() + 1);
+      return Math.floor(value.getTime() / 1000) - (end ? 1 : 0);
+    };
+    if (filter.since) args.push(`--since=@${dateTime(filter.since, false)}`);
+    if (filter.until) args.push(`--until=@${dateTime(filter.until, true)}`);
+    args.push(...(filter.ref ? [await this.resolveRef(filter.ref)] : ['--all', 'HEAD']));
+    if (filter.path) { this.path(filter.path); args.push('--', filter.path); }
+    return parseLog(await this.runner.text(args));
+  }
+  async history(path: string, limit = 200): Promise<Commit[]> {
+    this.path(path); if (!await this.hasHead()) return [];
+    return parseHistory(await this.runner.text(['log', '--follow', '-M', '--name-status', '-z', `--format=%x00GP_COMMIT%x00${LOG_FORMAT}%x00`, `--max-count=${Math.min(limit, 5000)}`, 'HEAD', '--', path]), path);
+  }
+  async historyFiles(): Promise<string[]> {
+    this.root();
+    const current = await this.runner.text(['ls-files', '-z', '--cached', '--others', '--exclude-standard']);
+    const committed = await this.hasHead() ? await this.runner.text(['ls-tree', '-r', '-z', '--name-only', 'HEAD']) : '';
+    return [...new Set([...current.split('\0'), ...committed.split('\0')].filter(Boolean))].sort((a, b) => a.localeCompare(b));
+  }
+  async commitDetail(ref: string): Promise<{ commit: Commit; files: ChangedFile[] }> {
+    const hash = await this.resolveRef(ref);
+    const fields = (await this.runner.text(['show', '-s', `--format=${LOG_FORMAT}%x00%B`, hash])).split('\0');
+    const commit = commitFromFields(fields); commit.body = fields[7]?.trim();
+    const raw = (await this.runner.text(['diff-tree', '--root', '--no-commit-id', '-r', '-M', '--name-status', '-z', ...(commit.parents.length ? [commit.parents[0], hash] : [hash])])).split('\0');
+    const files: ChangedFile[] = [];
+    for (let i = 0; i < raw.length && raw[i];) { const status = raw[i++]; const first = raw[i++]; if (/^[RC]/.test(status)) files.push({ status, oldPath: first, path: raw[i++] }); else files.push({ status, path: first }); }
+    return { commit, files };
+  }
+  async refs(): Promise<GitRef[]> {
+    const raw = await this.runner.text(['for-each-ref', '--format=%(refname)%00%(objectname)%00%(HEAD)%00%(upstream:short)', 'refs/heads', 'refs/remotes', 'refs/tags']);
+    return raw.trimEnd().split('\n').filter(Boolean).map(line => { const [fullName, hash, head, upstream] = line.split('\0'); const type = fullName.startsWith('refs/heads/') ? 'branch' : fullName.startsWith('refs/remotes/') ? 'remote' : 'tag'; return { fullName, hash, current: head === '*', upstream, type, name: fullName.replace(/^refs\/(heads|remotes|tags)\//, '') }; });
+  }
+  async file(path: string, ref: Revision): Promise<FileContent> {
+    this.path(path); if (ref.kind === 'empty') return missing();
+    if (ref.kind === 'worktree') {
+      try { const absolute = this.path(path); const info = await lstat(absolute); if (!info.isFile()) return { ...missing(), exists: true, binary: true }; if (info.size > MAX_TEXT) return content(Buffer.alloc(0), info.size); return content(await readFile(absolute)); }
+      catch (e) { if ((e as NodeJS.ErrnoException).code === 'ENOENT') return missing(); throw e; }
+    }
+    let object = '';
+    if (ref.kind === 'index') {
+      const records = (await this.runner.text(['ls-files', '--stage', '-z', '--', path])).split('\0');
+      const entry = records.find(line => /^\d+ [a-f0-9]+ 0\t/.test(line)); if (!entry) return missing(); object = entry.split(' ')[1];
+    } else {
+      const hash = await this.resolveRef(ref.ref);
+      const raw = await this.runner.text(['ls-tree', '-z', hash, '--', path]); if (!raw) return missing();
+      const entry = raw.split('\t')[0].split(' '); if (entry[1] !== 'blob') return { ...missing(), exists: true, binary: true }; object = entry[2];
+    }
+    const size = Number((await this.runner.text(['cat-file', '-s', object])).trim());
+    if (size > MAX_TEXT) return content(Buffer.alloc(0), size);
+    return content(await this.runner.run(['cat-file', 'blob', object]));
+  }
+  async diff(path: string, left: Revision = INDEX, right: Revision = WORKTREE, oldPath = path): Promise<FileDiff> {
+    this.path(path); this.path(oldPath);
+    const [before, after] = await Promise.all([this.file(oldPath, left), this.file(path, right)]);
+    let patch = ''; let stageable: FileDiff['stageable'] = null;
+    if (!before.binary && !after.binary && !before.large && !after.large) {
+      if (left.kind === 'index' && right.kind === 'worktree' && oldPath === path && before.exists) { patch = await this.runner.text(['diff', '--no-ext-diff', '--no-textconv', '--no-color', '--', path]); stageable = 'stage'; }
+      else if (left.kind === 'commit' && left.ref === 'HEAD' && right.kind === 'index' && oldPath === path) { patch = await this.runner.text(['diff', '--cached', '--no-ext-diff', '--no-textconv', '--no-color', '--', path]); stageable = 'unstage'; }
+      else patch = createTwoFilesPatch(oldPath, path, before.text, after.text, '', '', { context: 3 });
+    }
+    return { path, oldPath, left, right, before, after, patch, hunks: parseHunks(patch), stageable };
+  }
+  async stage(paths: string[]): Promise<void> { paths.forEach(p => this.path(p)); if (!paths.length) return; await this.runner.write(async () => { await this.pathsCommand(['add', '-A'], paths); }); }
+  async unstage(paths: string[]): Promise<void> {
+    paths.forEach(p => this.path(p)); if (!paths.length) return;
+    await this.runner.write(async () => { await this.pathsCommand(await this.hasHead() ? ['restore', '--staged'] : ['rm', '--cached', '-r', '--ignore-unmatch'], paths); });
+  }
+  async applyHunk(diff: FileDiff, index: number): Promise<void> {
+    if (!diff.stageable || !diff.hunks[index]) throw new Error('此差异不能按变更块暂存');
+    await this.runner.write(async () => {
+      const current = await this.diff(diff.path, diff.left, diff.right, diff.oldPath);
+      if (current.patch !== diff.patch) throw new Error('文件已变化，请刷新差异后重试');
+      const args = ['apply', '--cached', '--whitespace=nowarn', ...(diff.stageable === 'unstage' ? ['--reverse'] : [])];
+      await this.runner.text([...args, '--check', '-'], { input: diff.hunks[index].patch });
+      await this.runner.text([...args, '-'], { input: diff.hunks[index].patch });
+    });
+  }
+  async commit(message: string, amend = false): Promise<void> {
+    if (!message.trim()) throw new Error('请填写提交消息');
+    await this.runner.write(async () => {
+      const status = await this.status(); if (status.files.some(f => f.conflict)) throw new Error('请先解决所有冲突');
+      if (!amend && !status.operation && !status.files.some(f => !f.untracked && f.index !== '.')) throw new Error('暂存区为空，请先暂存要提交的文件');
+      await this.runner.text(['commit', ...(amend ? ['--amend'] : []), '--file=-'], { input: message });
+    });
+  }
+  async backup(path: string, reason: string): Promise<Backup> {
+    const absolute = await this.writablePath(path); const id = randomUUID();
+    const bytes = await readFile(absolute).catch(e => { if (e.code === 'ENOENT') return undefined; throw e; });
+    const backup: Backup = { id, path, reason, created: new Date().toISOString(), exists: bytes !== undefined };
+    const root = join(this.repo!.gitDir, 'git-plus-backups'); await mkdir(root, { recursive: true });
+    if (bytes) await writeFile(join(root, id + '.bin'), bytes, { flag: 'wx' });
+    await writeFile(join(root, id + '.json'), JSON.stringify(backup), { flag: 'wx' }); return backup;
+  }
+  async backups(): Promise<Backup[]> {
+    const root = join(this.repo!.gitDir, 'git-plus-backups'); const names = await readdir(root).catch(e => { if (e.code === 'ENOENT') return []; throw e; });
+    return (await Promise.all(names.filter(n => n.endsWith('.json')).map(async n => JSON.parse(await readFile(join(root, n), 'utf8')) as Backup))).sort((a, b) => b.created.localeCompare(a.created));
+  }
+  async restoreBackup(id: string): Promise<void> {
+    if (!/^[\da-f-]{36}$/.test(id)) throw new Error('无效备份');
+    await this.runner.write(async () => {
+      const item = JSON.parse(await readFile(join(this.repo!.gitDir, 'git-plus-backups', id + '.json'), 'utf8')) as Backup;
+      const absolute = await this.writablePath(item.path); await this.backup(item.path, '恢复备份前');
+      if (item.exists) { await mkdir(dirname(absolute), { recursive: true }); await writeFile(absolute, await readFile(join(this.repo!.gitDir, 'git-plus-backups', id + '.bin'))); }
+      else await unlink(absolute).catch(e => { if (e.code !== 'ENOENT') throw e; });
+    });
+  }
+  async restoreFile(path: string, ref: Revision, sourcePath = path): Promise<void> {
+    await this.runner.write(async () => {
+      const target = await this.file(sourcePath, ref); if (target.binary || target.large) throw new Error('此恢复操作仅支持 2 MiB 以内的文本文件');
+      const absolute = await this.writablePath(path); await this.backup(path, '恢复历史版本');
+      if (target.exists) { await mkdir(dirname(absolute), { recursive: true }); await writeFile(absolute, target.text); }
+      else await unlink(absolute).catch(e => { if (e.code !== 'ENOENT') throw e; });
+    });
+  }
+  async discard(paths: string[]): Promise<void> {
+    await this.runner.write(async () => {
+      const status = await this.status();
+      for (const path of paths) {
+        const file = status.files.find(f => f.path === path); if (!file) continue; if (file.conflict || file.submodule) throw new Error('冲突或子模块请在专用操作中处理');
+        await this.backup(path, '丢弃工作区修改');
+        if (file.untracked) await unlink(this.path(path)); else await this.runner.text(['restore', '--worktree', '--', path]);
+      }
+    });
+  }
+  async blame(path: string, text?: string): Promise<BlameLine[]> {
+    this.path(path); if (!await this.hasHead()) return [];
+    try { return parseBlame(await this.runner.text(['blame', '--line-porcelain', ...(text !== undefined ? ['--contents', '-'] : []), '--', path], { input: text, maxBytes: 32 * 1024 * 1024 })); }
+    catch (e) { if (e instanceof GitError && /no such path|no such file|no such.*HEAD|no final newline|cannot stat/.test(e.message)) return []; throw e; }
+  }
+  async lineChange(path: string, blame: BlameLine, contents?: string): Promise<BlameChange> {
+    this.path(path);
+    let before: FileContent, after: FileContent, number: number, label: string;
+    if (blame.uncommitted) {
+      before = await this.file(path, await this.hasHead() ? HEAD : EMPTY);
+      after = contents === undefined ? await this.file(path, WORKTREE) : content(Buffer.from(contents));
+      number = blame.line; label = 'HEAD → 当前笔记';
+    } else {
+      const historicalPath = blame.path || path; this.path(historicalPath);
+      const { commit, files } = await this.commitDetail(blame.hash);
+      const changed = files.find(file => file.path === historicalPath);
+      [before, after] = await Promise.all([
+        this.file(changed?.oldPath ?? historicalPath, commit.parents.length ? { kind: 'commit', ref: commit.parents[0] } : EMPTY),
+        this.file(historicalPath, { kind: 'commit', ref: commit.hash }),
+      ]);
+      number = blame.originalLine;
+      label = `${commit.parents.length ? commit.parents[0].slice(0, 7) : '首次新增'} → ${commit.hash.slice(0, 7)}${commit.parents.length > 1 ? '（第一个父提交）' : ''}`;
+    }
+    if (before.binary || after.binary || before.large || after.large) return { label, lines: [], truncated: false, notice: '二进制或超过 2 MiB 的文件不展开行差异' };
+    return lineChange(before.text, after.text, number, label);
+  }
+  async branch(action: 'create' | 'switch' | 'delete', name: string, start = 'HEAD'): Promise<void> {
+    if (!name || name.startsWith('-')) throw new Error('无效分支名'); await this.runner.text(['check-ref-format', '--branch', name]);
+    await this.runner.write(async () => {
+      if (action === 'create') await this.runner.text(['switch', '-c', name, await this.resolveRef(start)]);
+      else if (action === 'delete') await this.runner.text(['branch', '-d', '--', name]);
+      else { const status = await this.status(); if (status.files.length) throw new Error('请先提交或 stash 当前变化，再切换分支'); await this.runner.text(['switch', '--', name]); }
+    });
+  }
+  async tag(action: 'create' | 'delete', name: string, ref = 'HEAD'): Promise<void> {
+    if (!name || name.startsWith('-')) throw new Error('无效标签名'); await this.runner.text(['check-ref-format', `refs/tags/${name}`]);
+    await this.runner.write(async () => { await this.runner.text(action === 'create' ? ['tag', name, await this.resolveRef(ref)] : ['tag', '-d', '--', name]); });
+  }
+  async integrate(operation: Operation, ref: string): Promise<void> {
+    await this.runner.write(async () => {
+      const status = await this.status(); if (status.operation || status.files.length) throw new Error('请先完成当前操作，并提交或 stash 所有变化');
+      const hash = await this.resolveRef(ref);
+      await this.runner.text([operation, ...(operation === 'merge' ? ['--no-edit'] : operation === 'revert' ? ['--no-edit'] : []), hash]);
+    });
+  }
+  async continueOperation(operation: Operation, abort = false): Promise<void> {
+    await this.runner.write(async () => {
+      const status = await this.status(); if (status.operation !== operation) throw new Error('仓库操作状态已改变，请刷新');
+      if (!abort && status.files.some(f => f.conflict)) throw new Error('请先解决并暂存所有冲突文件');
+      await this.runner.text([operation, abort ? '--abort' : '--continue']);
+    });
+  }
+  async stashes(): Promise<Stash[]> {
+    const raw = await this.runner.text(['stash', 'list', '--format=%gd%x00%H%x00%gs']);
+    return raw.trimEnd().split('\n').filter(Boolean).map(line => { const [ref, hash, subject] = line.split('\0'); return { ref, hash, subject }; });
+  }
+  async stash(action: 'save' | 'apply' | 'pop' | 'drop', refOrMessage: string): Promise<void> {
+    await this.runner.write(async () => {
+      if (action === 'save') await this.runner.text(['stash', 'push', '--include-untracked', '-m', refOrMessage || 'Git Plus stash']);
+      else { if (!/^stash@\{\d+\}$/.test(refOrMessage)) throw new Error('无效 stash 引用'); await this.runner.text(['stash', action, refOrMessage]); }
+    });
+  }
+  async remotes(): Promise<{ name: string; url: string }[]> {
+    const names = (await this.runner.text(['remote'])).trim().split('\n').filter(Boolean);
+    return Promise.all(names.map(async name => ({ name, url: (await this.runner.text(['remote', 'get-url', name])).trim() })));
+  }
+  async remote(action: 'add' | 'set-url' | 'remove', name: string, url?: string): Promise<void> {
+    if (!/^[\w.-]+$/.test(name) || name.startsWith('-')) throw new Error('无效远程名');
+    if (action !== 'remove' && (!url || url.startsWith('-') || /[\r\n\0]/.test(url))) throw new Error('无效远程地址');
+    await this.runner.write(async () => { await this.runner.text(['remote', action, name, ...(action === 'remove' ? [] : [url!])]); });
+  }
+  async network(action: 'fetch' | 'pull' | 'push', remote?: string, branch?: string): Promise<void> {
+    if (remote && (!/^[\w.-]+$/.test(remote) || remote.startsWith('-'))) throw new Error('无效远程名');
+    if (branch) { if (branch.startsWith('-')) throw new Error('无效分支名'); await this.runner.text(['check-ref-format', '--branch', branch]); }
+    await this.runner.write(async () => {
+      if (action === 'fetch') await this.runner.text(['fetch', '--prune', ...(remote ? [remote] : ['--all'])], { timeout: 180000 });
+      else if (action === 'pull') await this.runner.text(['pull', '--ff-only', ...(remote ? [remote] : []), ...(branch ? [branch] : [])], { timeout: 180000 });
+      else await this.runner.text(['push', ...(remote && branch ? ['--set-upstream', remote, branch] : remote ? [remote] : [])], { timeout: 180000 });
+    });
+  }
+  async conflict(path: string): Promise<Conflict> {
+    this.path(path);
+    const raw = (await this.runner.text(['ls-files', '-u', '-z', '--', path])).split('\0').filter(Boolean);
+    if (!raw.length) throw new Error('此文件已不处于冲突状态');
+    const stages = new Map<number, FileContent>();
+    for (const entry of raw) {
+      const [mode, object, stage] = entry.split('\t')[0].split(' '); const size = +(await this.runner.text(['cat-file', '-s', object])).trim();
+      stages.set(+stage, mode === '120000' || mode === '160000' ? { ...missing(), binary: true, exists: true } : size > MAX_TEXT ? content(Buffer.alloc(0), size) : content(await this.runner.run(['cat-file', 'blob', object])));
+    }
+    const base = stages.get(1) ?? missing(), ours = stages.get(2) ?? missing(), theirs = stages.get(3) ?? missing();
+    const work = await this.file(path, WORKTREE); const result = work.text;
+    return { path, base, ours, theirs, result, blocks: conflictBlocks(result), fileLevel: [base, ours, theirs].some(f => f.binary || f.large) || !ours.exists || !theirs.exists };
+  }
+  async resolveConflict(path: string, choice: 'ours' | 'theirs' | 'result' | 'delete', text?: string, expected?: string): Promise<void> {
+    await this.runner.write(async () => {
+      const current = await this.conflict(path);
+      if (expected !== undefined && current.result !== expected) throw new Error('冲突文件已被外部修改，请重新打开后处理');
+      if (choice === 'result' && (text === undefined || conflictBlocks(text).length)) throw new Error('请先处理全部冲突标记');
+      await this.backup(path, '解决冲突前'); const absolute = await this.writablePath(path);
+      if (choice === 'delete' || (choice !== 'result' && !current[choice].exists)) {
+        await unlink(absolute).catch(e => { if (e.code !== 'ENOENT') throw e; }); await this.runner.text(['add', '-A', '--', path]);
+      } else if (choice === 'result') { await mkdir(dirname(absolute), { recursive: true }); await writeFile(absolute, text!); await this.runner.text(['add', '--', path]); }
+      else { await this.runner.text(['checkout', choice === 'ours' ? '--ours' : '--theirs', '--', path]); await this.runner.text(['add', '--', path]); }
+    });
+  }
+  async diagnostics(): Promise<string> {
+    const results = [this.repo?.gitVersion ?? (await this.runner.text(['--version'])).trim(), `仓库：${this.repo?.root ?? '未初始化'}`, `笔记库：${this.vault}`];
+    for (const key of ['user.name', 'user.email', 'credential.helper']) { const value = await this.runner.text(['config', '--get', key], { allowed: [1] }); results.push(`${key}：${value.trim() || '未配置'}`); }
+    if (this.repo) results.push(`远程：${(await this.remotes()).map(r => r.name).join(', ') || '无'}`);
+    return results.join('\n');
+  }
+  async testConnection(remote: string): Promise<string> { if (!/^[\w.-]+$/.test(remote) || remote.startsWith('-')) throw new Error('无效远程'); await this.runner.text(['ls-remote', '--exit-code', remote, 'HEAD'], { allowed: [2], timeout: 30000 }); return '连接成功'; }
+  fingerprint(text: string): string { return createHash('sha256').update(text).digest('hex'); }
+  dispose(): void { this.runner.dispose(); }
+}

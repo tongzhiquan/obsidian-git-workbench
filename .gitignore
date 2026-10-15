@@ -1,0 +1,11 @@
+node_modules/
+dist/
+release/
+.qa/
+*.log
+git-plus.local.json
+.env
+.env.*
+!.env.example
+.DS_Store
+Thumbs.db

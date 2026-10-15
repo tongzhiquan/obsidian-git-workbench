@@ -1,0 +1,6 @@
+{
+  "vaultPath": "/path/to/your-vault",
+  "obsidianAsar": "/path/to/obsidian-1.14.4.asar",
+  "obsidianLauncherAsar": "/path/to/Obsidian/resources/app.asar",
+  "obsidianCli": "/path/to/obsidian.com"
+}

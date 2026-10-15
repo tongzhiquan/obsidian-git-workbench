@@ -1,0 +1,10 @@
+{
+  "id": "git-plus",
+  "name": "Git Plus",
+  "version": "0.1.3",
+  "minAppVersion": "1.14.4",
+  "description": "提交图、笔记历史、版本比较、行内归属和完整 Git 工作台。",
+  "author": "tongzhiquan",
+  "authorUrl": "https://github.com/tongzhiquan",
+  "isDesktopOnly": true
+}
