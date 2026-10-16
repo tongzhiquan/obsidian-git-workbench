@@ -48,6 +48,96 @@ test('rename history resolves each historical path and commit detail paths', asy
     assert.equal((await f.git.log({ message: '补充' })).length, 1);
   } finally { await f.close(); }
 });
+
+test('editing index preserves worktree, HEAD, executable mode, other staged files and CRLF', async () => {
+  const f = await fixture(true); try {
+    const path = '笔记库/中文 [x] $ ` ;.md'; const original = 'first\r\nsecond\r\n';
+    const head = await f.seed(path, original); await f.runner.text(['update-index', '--chmod=+x', '--', path]);
+    await writeFile(join(f.root, 'other.md'), 'other staged\n'); await f.git.stage(['other.md']);
+    await writeFile(join(f.root, path), 'worktree stays separate\r\n');
+    const base = await f.git.file(path, INDEX); await f.git.saveIndex(path, 'edited index\r\nsecond', base);
+    assert.equal((await f.git.file(path, INDEX)).text, 'edited index\r\nsecond');
+    assert.equal(await readFile(join(f.root, path), 'utf8'), 'worktree stays separate\r\n');
+    assert.equal((await f.git.status()).head, head); assert.equal((await f.git.file(path, HEAD)).text, original);
+    assert.match((await f.git.file(path, INDEX)).indexEntry!, /^100755 /);
+    assert.equal((await f.git.file('other.md', INDEX)).text, 'other staged\n');
+    await f.git.saveIndex(path, '', await f.git.file(path, INDEX)); assert.equal((await f.git.file(path, INDEX)).exists, true); assert.equal((await f.git.file(path, INDEX)).size, 0);
+  } finally { await f.close(); }
+});
+
+test('index edit rejects external modifications and Git locks without losing data', async () => {
+  const f = await fixture(); try {
+    await f.seed('note.md', 'base\n'); const base = await f.git.file('note.md', INDEX);
+    await writeFile(join(f.root, 'note.md'), 'external\n'); await f.git.stage(['note.md']);
+    await assert.rejects(f.git.saveIndex('note.md', 'my draft\n', base), /暂存区已被/);
+    assert.equal((await f.git.file('note.md', INDEX)).text, 'external\n');
+    const current = await f.git.file('note.md', INDEX); const lock = join(f.git.repo!.gitDir, 'index.lock'); await writeFile(lock, 'another process');
+    await assert.rejects(f.git.saveIndex('note.md', 'draft\n', current), /index.lock/); assert.equal(await readFile(lock, 'utf8'), 'another process');
+    await rm(lock); await f.git.saveIndex('note.md', 'retry\n', current); assert.equal((await f.git.file('note.md', INDEX)).text, 'retry\n');
+    await assert.rejects(f.git.saveIndex('note.md', 'bad\0data', await f.git.file('note.md', INDEX)), /NUL/);
+    await assert.rejects(f.git.saveIndex('note.md', 'x'.repeat(2 * 1024 * 1024 + 1), await f.git.file('note.md', INDEX)), /2 MiB/);
+    await assert.rejects(f.git.saveIndex('missing.md', 'new', await f.git.file('missing.md', INDEX)), /无冲突的普通/);
+  } finally { await f.close(); }
+});
+
+test('saving working files preserves staged snapshot, HEAD, exact line endings and permissions', async () => {
+  const f = await fixture(true); try {
+    const path = '笔记库/中文 [x] $ ` ;.md'; const head = await f.seed(path, 'original\r\n');
+    await writeFile(join(f.root, path), 'staged\r\n'); await f.git.stage([path]);
+    await writeFile(join(f.root, path), 'working\r\n'); const base = await f.git.file(path, WORKTREE);
+    const staged = (await f.git.file(path, INDEX)).indexEntry, mode = (await stat(join(f.root, path))).mode;
+    await f.git.saveWorktree(path, 'edited worktree\r\nno final newline', base);
+    assert.equal(await readFile(join(f.root, path), 'utf8'), 'edited worktree\r\nno final newline');
+    assert.equal((await f.git.file(path, INDEX)).indexEntry, staged); assert.equal((await f.git.file(path, INDEX)).text, 'staged\r\n');
+    assert.equal((await f.git.status()).head, head); assert.equal((await stat(join(f.root, path))).mode, mode);
+    assert.equal((await f.git.status()).files.find(file => file.path === path)?.worktree, 'M');
+  } finally { await f.close(); }
+});
+
+test('untracked and deleted worktree files can be edited or recreated without automatic staging', async () => {
+  const f = await fixture(); try {
+    await f.seed('note.md', 'old\n'); await rm(join(f.root, 'note.md'));
+    await f.git.saveWorktree('note.md', 'recreated\n', await f.git.file('note.md', WORKTREE));
+    await writeFile(join(f.root, 'new.md'), 'new\n'); await f.git.saveWorktree('new.md', 'edited new', await f.git.file('new.md', WORKTREE));
+    assert.equal((await f.git.file('note.md', INDEX)).text, 'old\n'); assert.equal((await f.git.file('new.md', INDEX)).exists, false);
+    assert.equal((await f.git.status()).files.find(file => file.path === 'new.md')?.untracked, true);
+    await assert.rejects(f.git.saveWorktree('../escape.md', 'text', await f.git.file('new.md', WORKTREE)), /超出/);
+  } finally { await f.close(); }
+});
+
+test('worktree save refuses stale snapshots and unsupported content without invoking its writer', async () => {
+  const f = await fixture(); try {
+    await f.seed('note.md', 'old\n'); const base = await f.git.file('note.md', WORKTREE); let called = false;
+    await writeFile(join(f.root, 'note.md'), 'new\n');
+    await assert.rejects(f.git.saveWorktree('note.md', 'draft\n', base, async () => { called = true; }), /工作区文件已被/); assert.equal(called, false);
+    assert.equal(await readFile(join(f.root, 'note.md'), 'utf8'), 'new\n');
+    await assert.rejects(f.git.saveWorktree('note.md', 'bad\0text', base), /UTF-8/);
+    await assert.rejects(f.git.saveWorktree('note.md', 'x'.repeat(2 * 1024 * 1024 + 1), base), /2 MiB/);
+    await writeFile(join(f.root, 'binary.bin'), Buffer.from([0, 1, 2])); await assert.rejects(f.git.saveWorktree('binary.bin', 'text', await f.git.file('binary.bin', WORKTREE)), /UTF-8/);
+  } finally { await f.close(); }
+});
+
+test('index editing does not reapply clean filters, and works in a linked worktree', async () => {
+  const f = await fixture(); let linked: GitService | undefined; try {
+    await f.seed('note.md', 'base\n'); const tree = join(f.root, 'linked');
+    await f.runner.text(['worktree', 'add', '-b', 'linked', tree]); linked = new GitService(tree); await linked.discover();
+    const base = await linked.file('note.md', INDEX); await linked.saveIndex('note.md', 'linked draft\n', base);
+    assert.equal((await linked.file('note.md', INDEX)).text, 'linked draft\n'); assert.equal((await f.git.file('note.md', INDEX)).text, 'base\n');
+    await writeFile(join(tree, '.gitattributes'), 'note.md filter=qa\n');
+    await linked.runner.text(['config', 'filter.qa.clean', 'git hash-object --stdin']);
+    await linked.saveIndex('note.md', 'no double filtering\n', await linked.file('note.md', INDEX));
+    assert.equal((await linked.file('note.md', INDEX)).text, 'no double filtering\n');
+    assert.equal(await readFile(join(tree, 'note.md'), 'utf8'), 'base\n');
+  } finally { linked?.dispose(); await f.close(); }
+});
+
+test('diagnostics consistently display repository and vault paths with forward slashes', async () => {
+  const f = await fixture(true); try {
+    const result = await f.git.diagnostics();
+    assert.ok(result.includes(`仓库：${f.git.root().replace(/\\/g, '/')}`));
+    assert.ok(result.includes(`笔记库：${f.git.vault.replace(/\\/g, '/')}`));
+  } finally { await f.close(); }
+});
 test('history file picker candidates cover nested vault, outside files, deleted files and ignored paths', async () => {
   const f = await fixture(true); try {
     await writeFile(join(f.root, '.gitignore'), '*.ignored\n');

@@ -1,4 +1,4 @@
-import { readFile, writeFile, mkdir, stat, lstat, realpath, unlink, readdir } from 'node:fs/promises';
+import { readFile, writeFile, mkdir, stat, lstat, realpath, unlink, readdir, open, rename, copyFile } from 'node:fs/promises';
 import { resolve, relative, dirname, join, isAbsolute, sep } from 'node:path';
 import { randomUUID, createHash } from 'node:crypto';
 import { createTwoFilesPatch } from 'diff';
@@ -118,18 +118,48 @@ export class GitService {
       try { const absolute = this.path(path); const info = await lstat(absolute); if (!info.isFile()) return { ...missing(), exists: true, binary: true }; if (info.size > MAX_TEXT) return content(Buffer.alloc(0), info.size); return content(await readFile(absolute)); }
       catch (e) { if ((e as NodeJS.ErrnoException).code === 'ENOENT') return missing(); throw e; }
     }
-    let object = '';
+    let object = '', indexEntry: string | undefined;
     if (ref.kind === 'index') {
-      const records = (await this.runner.text(['ls-files', '--stage', '-z', '--', path])).split('\0');
-      const entry = records.find(line => /^\d+ [a-f0-9]+ 0\t/.test(line)); if (!entry) return missing(); object = entry.split(' ')[1];
+      indexEntry = await this.indexEntry(path);
+      const entry = indexEntry.split('\0').find(line => /^\d+ [a-f0-9]+ 0\t/.test(line));
+      if (!entry) return { ...missing(), indexEntry };
+      if (!/^100(644|755) /.test(entry)) return { ...missing(), exists: true, binary: true, indexEntry };
+      object = entry.split(' ')[1];
     } else {
       const hash = await this.resolveRef(ref.ref);
       const raw = await this.runner.text(['ls-tree', '-z', hash, '--', path]); if (!raw) return missing();
       const entry = raw.split('\t')[0].split(' '); if (entry[1] !== 'blob') return { ...missing(), exists: true, binary: true }; object = entry[2];
     }
     const size = Number((await this.runner.text(['cat-file', '-s', object])).trim());
-    if (size > MAX_TEXT) return content(Buffer.alloc(0), size);
-    return content(await this.runner.run(['cat-file', 'blob', object]));
+    if (size > MAX_TEXT) return { ...content(Buffer.alloc(0), size), indexEntry };
+    return { ...content(await this.runner.run(['cat-file', 'blob', object])), indexEntry };
+  }
+  private async indexEntry(path: string): Promise<string> {
+    return (await this.runner.text(['ls-files', '--stage', '-z', '--', path])).split('\0').filter(line => line.slice(line.indexOf('\t') + 1) === path).join('\0');
+  }
+  async saveIndex(path: string, text: string, base: FileContent): Promise<void> {
+    this.path(path);
+    if (!base.exists || base.binary || base.large || !/^100(644|755) [a-f0-9]+ 0\t/.test(base.indexEntry ?? '') || base.indexEntry!.includes('\0')) throw new Error('仅支持编辑暂存区中无冲突的普通文本文件');
+    if (text.includes('\0') || Buffer.byteLength(text) > MAX_TEXT) throw new Error('暂存区编辑仅支持 2 MiB 以内且不含 NUL 的文本');
+    await this.runner.write(async () => {
+      const index = resolve(this.root(), (await this.runner.text(['rev-parse', '--git-path', 'index'])).trim());
+      const lock = index + '.lock', temporary = index + '.git-plus-' + randomUUID();
+      const handle = await open(lock, 'wx').catch(error => { if (error.code === 'EEXIST') throw new Error('Git index.lock 已存在，请等待其他 Git 操作完成后重试；草稿已保留'); throw error; });
+      let installed = false;
+      try {
+        if (await this.indexEntry(path) !== base.indexEntry) throw new Error('暂存区已被其他操作修改，未覆盖；请复制草稿后放弃草稿并刷新比较');
+        await copyFile(index, temporary);
+        // The editor works on the blob itself: do not run worktree clean filters a second time.
+        const object = (await this.runner.text(['hash-object', '-w', '--stdin', '--no-filters'], { input: text })).trim();
+        await this.runner.text(['update-index', '--cacheinfo', base.indexEntry!.split(' ')[0], object, path], { indexFile: temporary });
+        await handle.writeFile(await readFile(temporary)); await handle.sync(); await handle.close();
+        await rename(lock, index); installed = true;
+      } finally {
+        await handle.close().catch(() => {});
+        if (!installed) await unlink(lock).catch(() => {});
+        await unlink(temporary).catch(() => {}); await unlink(temporary + '.lock').catch(() => {});
+      }
+    });
   }
   async diff(path: string, left: Revision = INDEX, right: Revision = WORKTREE, oldPath = path): Promise<FileDiff> {
     this.path(path); this.path(oldPath);
@@ -141,6 +171,16 @@ export class GitService {
       else patch = createTwoFilesPatch(oldPath, path, before.text, after.text, '', '', { context: 3 });
     }
     return { path, oldPath, left, right, before, after, patch, hunks: parseHunks(patch), stageable };
+  }
+  async saveWorktree(path: string, text: string, base: FileContent, writer?: () => Promise<void>): Promise<void> {
+    this.path(path);
+    if (base.binary || base.large || text.includes('\0') || Buffer.byteLength(text) > MAX_TEXT) throw new Error('工作区编辑仅支持 2 MiB 以内的普通 UTF-8 文本');
+    await this.runner.write(async () => {
+      const absolute = await this.writablePath(path), current = await this.file(path, WORKTREE);
+      if (current.exists !== base.exists || current.binary || current.large || current.text !== base.text) throw new Error('工作区文件已被其他操作修改，未覆盖；草稿已保留，请重新比较');
+      if (writer) await writer();
+      else { await mkdir(dirname(absolute), { recursive: true }); await writeFile(absolute, text, { flag: base.exists ? 'w' : 'wx' }); }
+    });
   }
   async stage(paths: string[]): Promise<void> { paths.forEach(p => this.path(p)); if (!paths.length) return; await this.runner.write(async () => { await this.pathsCommand(['add', '-A'], paths); }); }
   async unstage(paths: string[]): Promise<void> {
@@ -310,7 +350,8 @@ export class GitService {
     });
   }
   async diagnostics(): Promise<string> {
-    const results = [this.repo?.gitVersion ?? (await this.runner.text(['--version'])).trim(), `仓库：${this.repo?.root ?? '未初始化'}`, `笔记库：${this.vault}`];
+    const displayPath = (path: string) => path.replace(/\\/g, '/');
+    const results = [this.repo?.gitVersion ?? (await this.runner.text(['--version'])).trim(), `仓库：${this.repo ? displayPath(this.repo.root) : '未初始化'}`, `笔记库：${displayPath(this.vault)}`];
     for (const key of ['user.name', 'user.email', 'credential.helper']) { const value = await this.runner.text(['config', '--get', key], { allowed: [1] }); results.push(`${key}：${value.trim() || '未配置'}`); }
     if (this.repo) results.push(`远程：${(await this.remotes()).map(r => r.name).join(', ') || '无'}`);
     return results.join('\n');

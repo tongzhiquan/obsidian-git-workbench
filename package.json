@@ -25,7 +25,11 @@
     "reload-local": "node scripts/reload-local.mjs",
     "check-vault": "tsx scripts/check-vault.ts"
   },
-  "dependencies": { "diff": "8.0.2" },
+  "dependencies": {
+    "@codemirror/commands": "6.10.4",
+    "@codemirror/merge": "6.12.2",
+    "diff": "8.0.2"
+  },
   "devDependencies": {
     "@codemirror/state": "6.7.6",
     "@codemirror/view": "6.43.13",

@@ -12,7 +12,7 @@ export class GitError extends Error {
     super(raw + (hint ? '\n\n' + hint : '')); this.name = 'GitError';
   }
 }
-export interface RunOptions { input?: string | Buffer; allowed?: number[]; timeout?: number; maxBytes?: number; signal?: AbortSignal }
+export interface RunOptions { input?: string | Buffer; allowed?: number[]; timeout?: number; maxBytes?: number; signal?: AbortSignal; indexFile?: string }
 export class GitRunner {
   private children = new Set<ReturnType<typeof spawn>>();
   private tail: Promise<unknown> = Promise.resolve();
@@ -23,7 +23,7 @@ export class GitRunner {
     return new Promise((resolve, reject) => {
       const child = spawn(this.executable, ['-c', 'core.quotepath=false', '-c', 'color.ui=false', ...args], {
         cwd: this.cwd, windowsHide: true, shell: false,
-        env: { ...process.env, GIT_TERMINAL_PROMPT: '0', GIT_EDITOR: 'true', GIT_SEQUENCE_EDITOR: 'true', GIT_OPTIONAL_LOCKS: '0', LC_ALL: 'C', GIT_LITERAL_PATHSPECS: '1' },
+        env: { ...process.env, GIT_TERMINAL_PROMPT: '0', GIT_EDITOR: 'true', GIT_SEQUENCE_EDITOR: 'true', GIT_OPTIONAL_LOCKS: '0', LC_ALL: 'C', GIT_LITERAL_PATHSPECS: '1', ...(options.indexFile ? { GIT_INDEX_FILE: options.indexFile } : {}) },
         stdio: ['pipe', 'pipe', 'pipe'],
       });
       this.children.add(child); const out: Buffer[] = []; const err: Buffer[] = []; let size = 0; let failure: Error | undefined;

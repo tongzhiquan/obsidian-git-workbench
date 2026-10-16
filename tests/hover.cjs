@@ -46,5 +46,6 @@ module.exports = async function hoverChecks({ window, js, check, capture }) {
   await js("(()=>{const c=app.plugins.plugins['git-plus'].controller;window.__qaLineChange=c.lineChange;c.lineChange=()=>new Promise(r=>{window.__qaResolveDiff=r})})()");await hover(false);
   check(await js("document.querySelector('.gp-blame-card-diff')?.getAttribute('aria-busy')==='true'"),'delayed line query displays loading state');
   await js("(()=>{document.querySelector('.gp-blame-card-close').click();window.__qaResolveDiff({label:'stale',lines:[],truncated:false});const c=app.plugins.plugins['git-plus'].controller;c.lineChange=window.__qaLineChange})()");await delay(120);check(await count()===0,'late line diff response does not reopen closed card');
-  await hover();check(await count()===1,'hover card ready for edit invalidation');
+  for(let attempt=0;attempt<3;attempt++){await hover();if(await count()===1)break;const fresh=await rect('.cm-content');move(fresh.left+30,fresh.top+160);await delay(700);}
+  check(await count()===1,'hover card ready for edit invalidation');
 };

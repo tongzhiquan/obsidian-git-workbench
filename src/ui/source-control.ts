@@ -1,9 +1,10 @@
-import { ItemView, Menu, setIcon, type WorkspaceLeaf } from 'obsidian';
+import { ItemView, Menu, Notice, setIcon, type WorkspaceLeaf } from 'obsidian';
 import type GitPlus from '../main';
 import { EMPTY, HEAD, INDEX, WORKTREE, type FileStatus } from '../types';
 import { button, ConfirmModal, el, empty, virtualList } from './common';
 import { GIT_PLUS_ICON } from './icon';
 import { formatCommitMessage } from '../commit-message';
+import { statusBadge } from './status';
 export const SOURCE_CONTROL = 'git-plus-source-control';
 export class SourceControlView extends ItemView {
   private unsubscribe?: () => void;
@@ -15,7 +16,7 @@ export class SourceControlView extends ItemView {
   getViewType(): string { return SOURCE_CONTROL; }
   getDisplayText(): string { return 'Git Plus · 源代码管理'; }
   getIcon(): string { return GIT_PLUS_ICON; }
-  async onOpen(): Promise<void> { this.unsubscribe = this.plugin.controller.subscribe(() => { if (!this.focused) this.render(); }); this.render(); }
+  async onOpen(): Promise<void> { this.containerEl.addClass('gp-container'); this.unsubscribe = this.plugin.controller.subscribe(() => { if (!this.focused) this.render(); }); this.render(); }
   async onClose(): Promise<void> { this.unsubscribe?.(); this.disposeList?.(); }
   fillBackupMessage(): void {
     const fill = () => {
@@ -59,10 +60,10 @@ export class SourceControlView extends ItemView {
     if (!rows.length) empty(list, '工作区干净', '所有变化已提交。');
     else this.disposeList = virtualList(list, rows, 42, (row, data) => {
       if ('title' in data) { row.classList.add('gp-group-heading'); el(row, 'strong', '', `${data.title}  ${data.files.length}`); if (data.type !== 'conflict') button(row, data.type === 'index' ? '− 全部' : '+ 全部', () => this.stage(data.files, data.type === 'index'), 'gp-icon-button'); return; }
-      const { file, type } = data; row.classList.add('gp-sc-file'); const outside = this.plugin.git.vaultPath(file.path) === undefined;
+      const { file, type } = data; row.classList.add('gp-sc-file'); row.dataset.path = file.path; row.dataset.group = type; const outside = this.plugin.git.vaultPath(file.path) === undefined;
       const open = () => type === 'conflict' ? this.plugin.openConflict(file.path) : this.plugin.openDiff(file.path, type === 'index' ? s?.head === '(initial)' ? EMPTY : HEAD : file.untracked ? EMPTY : INDEX, type === 'index' ? INDEX : WORKTREE, type === 'index' && file.oldPath ? file.oldPath : file.path);
       const link = button(row, file.path, open, 'gp-file-link'); link.title = `${outside ? '当前笔记库外 · ' : ''}${file.path}${file.oldPath ? ` ← ${file.oldPath}` : ''}`;
-      if (outside) el(row, 'span', 'gp-outside', '库外'); el(row, 'span', type === 'conflict' ? 'gp-danger gp-file-status' : 'gp-file-status', type === 'index' ? file.index : type === 'untracked' ? '?' : file.worktree);
+      if (outside) el(row, 'span', 'gp-outside', '库外'); statusBadge(row, type === 'index' ? file.index : file.worktree, type === 'conflict' || type === 'untracked' ? type : undefined);
       if (type !== 'conflict') button(row, type === 'index' ? '−' : '+', () => this.stage([file], type === 'index'), 'gp-icon-button');
       row.oncontextmenu = e => {
         e.preventDefault(); const menu = new Menu(); menu.addItem(i => i.setTitle('查看文件历史').setIcon('history').onClick(() => void this.plugin.openHistory(file.path)));
@@ -73,6 +74,7 @@ export class SourceControlView extends ItemView {
   }
   private stage(files: FileStatus[], unstage: boolean): Promise<unknown> {
     const paths = [...new Set(files.flatMap(f => f.oldPath ? [f.oldPath, f.path] : [f.path]))];
+    if (paths.some(path => this.plugin.indexDrafts.has(path) || this.plugin.worktreeDrafts.has(path))) { new Notice('请先保存或放弃这些文件的比较草稿，再调整暂存状态'); return Promise.resolve(); }
     return this.plugin.run(unstage ? '取消暂存' : '暂存', async () => { if (!unstage) await this.plugin.flushEditors(); if (unstage) await this.plugin.git.unstage(paths); else await this.plugin.git.stage(paths); });
   }
 }

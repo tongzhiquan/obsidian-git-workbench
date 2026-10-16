@@ -11,7 +11,9 @@ export interface Commit { hash: string; parents: string[]; author: string; email
 export interface LogFilter { author?: string; message?: string; since?: string; until?: string; path?: string; ref?: string }
 export interface GitRef { name: string; fullName: string; hash: string; type: 'branch' | 'remote' | 'tag'; current: boolean; upstream: string }
 export interface ChangedFile { path: string; oldPath?: string; status: string }
-export interface FileContent { text: string; size: number; binary: boolean; large: boolean; exists: boolean }
+export interface FileContent { text: string; size: number; binary: boolean; large: boolean; exists: boolean; indexEntry?: string }
+export type EditTarget = 'index' | 'worktree';
+export interface TextDraft { text: string; base: FileContent }
 export interface DiffHunk { header: string; lines: string[]; patch: string; index: number }
 export interface FileDiff { path: string; oldPath: string; left: Revision; right: Revision; before: FileContent; after: FileContent; patch: string; hunks: DiffHunk[]; stageable: 'stage' | 'unstage' | null }
 export interface BlameLine { hash: string; author: string; date: number; subject: string; originalLine: number; line: number; path: string; text: string; uncommitted: boolean }

@@ -72,8 +72,29 @@ button.gp-file-link:hover { color: var(--interactive-accent); background: var(--
 .gp-path { flex: 1; min-width: 150px; overflow-wrap: anywhere; font-size: 12px; }
 .gp-diff-bar .gp-muted { font-size: 11px; }
 .gp-diff-meta { display: flex; gap: 20px; padding: 6px 16px; font-size: 11px; color: var(--text-muted); }
-.gp-hunk-tools { display: flex; flex-wrap: wrap; gap: 5px; padding: 6px 16px; max-height: 90px; overflow: auto; }
-.gp-hunk-tools button { height: 23px; font-size: 10px; }
+.gp-diff-tools { display: flex; align-items: center; gap: 4px; margin-left: auto; }
+.gp-diff-tool { width: 28px; padding: 4px !important; display: inline-flex; align-items: center; justify-content: center; background: transparent; }
+.gp-diff-tool svg { width: 16px; height: 16px; }
+.gp-diff-tool[aria-pressed="true"] { color: var(--interactive-accent); background: var(--background-modifier-hover); }
+.gp-diff-count { color: var(--text-muted); font-size: 11px; white-space: nowrap; min-width: 72px; text-align: center; }
+.gp-diff-edit-status { font-size: 12px; color: var(--text-muted); padding: 6px 16px; }
+.gp-diff-edit-controls { display: flex; gap: 8px; padding: 4px 16px 10px; }
+.gp-merge-body > .cm-mergeView { width: 100%; height: 100%; overflow: auto; }
+.gp-merge-body > .cm-editor { width: 100%; height: 100%; }
+.gp-merge-body .cm-editor { background: var(--background-primary); color: var(--text-normal); }
+.gp-merge-body .cm-scroller { font-family: var(--font-monospace); font-size: 12px; line-height: 25px; overflow: auto; }
+.gp-merge-body .cm-gutters { background: var(--background-primary-alt); color: var(--text-faint); border-color: var(--background-modifier-border); }
+.gp-merge-body .cm-mergeViewEditor + .cm-mergeViewEditor { border-left: 1px solid var(--background-modifier-border); }
+.gp-merge-body .cm-merge-a .cm-changedLine, .gp-merge-body .cm-deletedChunk { background-color: color-mix(in srgb, #e15c66 12%, transparent); }
+.gp-merge-body .cm-merge-b .cm-changedLine, .gp-merge-body .cm-insertedLine { background-color: color-mix(in srgb, #27b879 12%, transparent); }
+.gp-merge-body .cm-merge-a .cm-changedText, .gp-merge-body .cm-deletedText { background: color-mix(in srgb, #e15c66 28%, transparent); text-decoration: none; }
+.gp-merge-body .cm-merge-b .cm-changedText, .gp-merge-body .cm-insertedLine ins { background: color-mix(in srgb, #27b879 28%, transparent); text-decoration: none; }
+.gp-merge-body .cm-collapsedLines { background: var(--background-secondary) !important; color: var(--text-muted) !important; border-block: 1px solid var(--background-modifier-border); font-size: 11px; }
+.gp-merge-body .cm-content { caret-color: var(--text-normal); }
+.gp-merge-body .cm-content, .gp-merge-body .cm-line, .gp-merge-body .cm-deletedChunk { user-select: text; -webkit-user-select: text; }
+.gp-merge-body .cm-content { cursor: text; }
+.gp-merge-body .cm-gutters { user-select: none; -webkit-user-select: none; }
+.gp-merge-body .cm-cursor { border-left-color: var(--text-normal); }
 .gp-diff-columns { display: grid; grid-template-columns: 1fr 1fr; background: var(--background-secondary); color: var(--text-muted); font-size: 11px; padding: 7px 0; border-bottom: 1px solid var(--background-modifier-border); }
 .gp-diff-columns span { padding-left: 20px; }
 .gp-diff-body { display: flex; flex: 1; min-height: 150px; overflow: hidden; }
@@ -141,6 +162,17 @@ button.gp-icon-button:hover { background: var(--background-modifier-hover); colo
 .gp-sc-file .gp-file-link { flex: 1; min-width: 0; font-size: 11px; }
 .gp-sc-file:hover { background: var(--background-modifier-hover); }
 .gp-file-status { color: var(--text-muted); width: 12px; font-size: 11px; }
+.gp-container { --gp-git-added: #387600; --gp-git-modified: #895503; --gp-git-deleted: #ad0707; --gp-git-renamed: #007166; --gp-git-copied: #006b94; --gp-git-conflict: #a45200; }
+.theme-dark .gp-container { --gp-git-added: #81b88b; --gp-git-modified: #e2c08d; --gp-git-deleted: #f08080; --gp-git-renamed: #73c991; --gp-git-copied: #78c5db; --gp-git-conflict: #efb36b; }
+.gp-file-status { display: inline-block; flex: 0 0 auto; text-align: center; font-weight: 600; }
+.gp-status-added, .gp-status-untracked { color: var(--gp-git-added); }
+.gp-status-modified { color: var(--gp-git-modified); }
+.gp-status-deleted { color: var(--gp-git-deleted); }
+.gp-status-renamed { color: var(--gp-git-renamed); }
+.gp-status-copied { color: var(--gp-git-copied); }
+.gp-status-conflict { color: var(--gp-git-conflict); }
+.gp-changed-files .gp-file-link { display: flex; align-items: center; gap: 8px; }
+.gp-changed-files .gp-file-link > span:last-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .gp-outside { color: var(--text-faint); font-size: 9px; padding: 1px 3px; background: var(--background-secondary); border-radius: 3px; white-space: nowrap; }
 .gp-statusbar { cursor: pointer; }
 .gp-inline-blame { display: inline; margin-left: 24px; padding: 0; background: transparent; font-family: inherit; font-size: 11px; line-height: inherit; font-weight: normal; color: var(--text-faint); user-select: none; opacity: .75; white-space: nowrap; vertical-align: baseline; cursor: default; }

@@ -55,7 +55,28 @@ Obsidian 检查覆盖：真实插件加载、默认自动化关闭、提交图�
 - 锁文件改用 npm 官方源，逐项比较确认依赖版本与 integrity 未改变；`npm ci --dry-run --ignore-scripts` 通过。
 - 安装目录 README、LICENSE、作者信息与源码一致；CLI 实际返回 `Reloaded: git-plus`；真实笔记库的 HEAD、index、Git Plus 设置和启用列表校验值与本次操作前一致。
 - 隔离 Obsidian 测试本轮未完整通过：初次在等待编辑器归属时失败，改为限时等待实际就绪后通过该项，后续复测在悬浮卡片加载状态、确认框操作出现失败。未记录插件运行时异常；上文 52 项通过为此前完整验收结果，不代表本轮全部通过。失败结果留在被忽略的 `.qa/obsidian-failure.json`。
-- 项目源码仓库仍无提交、暂存区为空；远程仅添加地址，未推送或发布 Release。
+- 此段为首次发布前的历史记录；随后已完成首个公开提交及 `v0.1.3` 标签。本轮新增调整记录在更新日志“未发布”部分。
+
+## 2026-10-15：比较视图与说明调整
+
+- `npm test`：28 项通过，新增覆盖直接编辑暂存区、工作区/HEAD 不变、特殊文件名、CRLF、无末尾换行、执行权限、其他已暂存文件保留、过期快照、Git 锁、链接工作树与 clean filter。
+- `npm run test:obsidian`：61 项完整隔离回归通过，新增验证可编辑暂存区、明确保存、Ctrl+S、草稿在切换/刷新/重载后恢复、放弃草稿、只读工作区、差异导航、折叠与打开文件；原有编辑器归属、悬浮卡片、提交、冲突继续、分页及卸载清理全部通过，无插件运行时异常。
+- 真实 Obsidian 1.14.4 中检查浅色、深色和窄窗口的比较视图，截图保存在 `.qa/git-plus-comparison-light.png`、`.qa/git-plus-comparison-dark.png`、`.qa/git-plus-comparison-narrow.png`、`.qa/git-plus-comparison-folded.png`。
+- 测试启动器同时写入隔离应用名称对应的配置，关闭初始设置窗口；操作后等待实际视图就绪，明确定位到目标笔记的首行。避免窗口焦点、异步刷新及隐藏编辑器导致误判。
+- `CHANGELOG.md` 与开发发布约定随安装包、README 一起更新。本轮维持版本号 0.1.3，条目暂列“未发布”，尚未创建新提交或标签。
+- `npm run package` 通过；核对 ZIP 中 8 个发布文件与源码/构建结果一致。`npm run install-local` 已完成，安装后的 README、更新日志和开发发布约定与源码一致。
+- 真实笔记库只读检查通过；安装前后 HEAD、index、Git Plus 设置与插件启用列表的校验值全部一致。结果存于 `.qa/install-verification.json`，只读检查日志存于 `.qa/check-vault-readonly.log`。
+- 安装时 Obsidian 未运行，CLI 明确返回无法找到运行中的 Obsidian，未执行重载；下一次启动将读取已安装文件。此限制不影响隔离实例内已完成的加载、重载与卸载验证。
+
+## 2026-10-15：工作区编辑、状态配色与历史复制
+
+- `npm test`：31 项全部通过，新增验证工作文件保存不修改暂存快照/HEAD，保留 CRLF、无末尾换行及文件权限；未跟踪文件编辑、已删除文件重新创建、过期快照与不支持内容均有覆盖。
+- `npm run test:obsidian`：81 项完整检查通过，无插件运行时异常。覆盖工作区草稿独立保存与重载恢复、保存后已打开笔记更新、拒绝覆盖另一笔记编辑器的新内容、未跟踪文件编辑、删除后重建，以及不在 Vault 文件索引中的 `.obsidian` 配置文件。
+- 历史比较两侧实际鼠标拖选、部分复制、Ctrl+A/Ctrl+C、输入保护、统一差异复制及旧版本删除行复制全部通过。复制测试使用隔离替身，保留系统剪贴板。
+- 浅色/深色主题下，对真实 A/M/D/R/U 状态验证颜色与中文说明；冲突 U 使用独立语义。截图：`.qa/git-plus-status-light.png`、`.qa/git-plus-status-dark.png`、`.qa/git-plus-history-selection.png`。
+- 参考 Git History for Obsidian 的历史/比较入口与状态呈现，并遵循工作文件保存、暂存和提交彼此独立的逻辑；具体参考链接见 README。
+- 安装包 8 个文件与构建/文档一致，已安装并由 CLI 返回 `Reloaded: git-plus`；实机查询确认插件已加载、控制器无错误、侧栏仅一个。插件设置、启用列表及原有源码暂存区校验值保持一致。
+- 个人仓库在升级核验期间从无提交变为已有提交，HEAD/index 的前后值因此不同，未尝试回退。本轮安装未执行个人仓库的 Git 写操作；原始核验结果保存在 `.qa/editing-install-verification.json`。
 
 ## 尚未实际验证
 

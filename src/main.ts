@@ -8,10 +8,15 @@ import { SourceControlView, SOURCE_CONTROL } from './ui/source-control';
 import { button, ConfirmModal, el, PromptModal } from './ui/common';
 import { GIT_PLUS_ICON, registerGitPlusIcon } from './ui/icon';
 import { formatCommitMessage } from './commit-message';
+import { shell } from 'electron';
+import type { EditTarget, FileContent, TextDraft } from './types';
 export default class GitPlus extends Plugin {
   settings: Settings = { ...DEFAULT_SETTINGS };
   git!: GitService;
   controller!: RepositoryController;
+  readonly indexDrafts = new Map<string, TextDraft>();
+  readonly worktreeDrafts = new Map<string, TextDraft>();
+  private draftTimer?: ReturnType<typeof setTimeout>;
   private statusBar?: HTMLElement;
   private autoTimer?: number;
   private saveTail: Promise<void> = Promise.resolve();
@@ -20,6 +25,9 @@ export default class GitPlus extends Plugin {
   async onload(): Promise<void> {
     if (!Platform.isDesktopApp || !(this.app.vault.adapter instanceof FileSystemAdapter)) { new Notice('Git Plus 需要桌面文件系统笔记库'); return; }
     const data = await this.loadData(); this.settings = { ...DEFAULT_SETTINGS, ...data?.settings };
+    for (const target of ['index', 'worktree'] as const) if (Array.isArray(data?.[`${target}Drafts`])) for (const entry of data[`${target}Drafts`]) {
+      if (Array.isArray(entry) && typeof entry[0] === 'string' && typeof entry[1]?.text === 'string' && typeof entry[1]?.base?.text === 'string' && (target !== 'index' || typeof entry[1]?.base?.indexEntry === 'string')) this.drafts(target).set(entry[0], entry[1]);
+    }
     this.settings.pageSize = 200; this.settings.intervalMinutes = Math.max(1, Math.min(1440, Number(this.settings.intervalMinutes) || 10));
     this.git = new GitService(this.app.vault.adapter.getBasePath(), this.settings.gitPath);
     this.controller = new RepositoryController(this.git, this.settings, message => new Notice(message, 8000));
@@ -70,13 +78,54 @@ export default class GitPlus extends Plugin {
       if (this.settings.pullOnStartup && this.git.repo) void this.run('启动拉取', () => this.git.network('pull'));
     });
   }
-  persistSettings(): Promise<void> { const data = { settings: { ...this.settings } }; this.saveTail = this.saveTail.catch(() => {}).then(() => this.saveData(data)); return this.saveTail; }
+  persistSettings(): Promise<void> { const data = { settings: { ...this.settings }, indexDrafts: [...this.indexDrafts], worktreeDrafts: [...this.worktreeDrafts] }; this.saveTail = this.saveTail.catch(() => {}).then(() => this.saveData(data)); return this.saveTail; }
+  drafts(target: EditTarget): Map<string, TextDraft> { return target === 'index' ? this.indexDrafts : this.worktreeDrafts; }
+  setIndexDraft(path: string, draft?: TextDraft): void { this.setDiffDraft(path, 'index', draft); }
+  setDiffDraft(path: string, target: EditTarget, draft?: TextDraft): void {
+    if (draft) this.drafts(target).set(path, draft); else this.drafts(target).delete(path);
+    clearTimeout(this.draftTimer);
+    this.draftTimer = setTimeout(() => { this.draftTimer = undefined; void this.persistSettings().catch(error => new Notice(`比较编辑草稿保存失败：${error.message}`)); }, 300);
+  }
+  async saveWorkingFile(path: string, text: string, base: FileContent): Promise<void> {
+    const relative = this.git.vaultPath(path), normal = (value: string) => value.replace(/\r\n/g, '\n');
+    const checkEditors = () => {
+      this.app.workspace.iterateAllLeaves(leaf => {
+        if (relative !== undefined && leaf.view instanceof MarkdownView && leaf.view.file?.path === relative && normal(leaf.view.editor.getValue()) !== normal(base.text)) throw new Error('此笔记的编辑器内容已变化，未覆盖；请先保存原笔记，再重新比较。比较草稿已保留');
+      });
+    };
+    checkEditors();
+    const indexedFile = relative === undefined ? undefined : this.app.vault.getAbstractFileByPath(relative);
+    const hidden = relative !== undefined && (relative.split('/').some(part => part.startsWith('.')) || relative === this.app.vault.configDir || relative.startsWith(this.app.vault.configDir + '/'));
+    const throughVault = relative !== undefined && (indexedFile instanceof TFile || !base.exists && !hidden);
+    await this.git.saveWorktree(path, text, base, !throughVault ? undefined : async () => {
+      checkEditors(); const file = this.app.vault.getAbstractFileByPath(relative!);
+      if (file instanceof TFile) {
+        await this.app.vault.process(file, current => { checkEditors(); if (current !== base.text || !base.exists) throw new Error('工作区文件已变化，草稿已保留，请重新比较'); return text; });
+      } else if (!base.exists) await this.app.vault.create(relative!, text);
+      else throw new Error('工作区文件已删除，草稿已保留，请重新比较');
+    });
+  }
+  async openComparisonFile(path: string): Promise<void> {
+    const relative = this.git.vaultPath(path);
+    if (relative !== undefined) {
+      const file = this.app.vault.getAbstractFileByPath(relative);
+      if (!(file instanceof TFile)) { new Notice('工作区文件不存在，可能已删除或重命名'); return; }
+      await this.app.workspace.getLeaf('tab').openFile(file);
+    } else {
+      const error = await shell.openPath(this.git.path(path)); if (error) new Notice(`无法打开文件：${error}`);
+    }
+  }
   configureAutomation(): void {
     if (this.autoTimer) window.clearInterval(this.autoTimer);
     if (this.settings.autoCommit || this.settings.autoSync) this.autoTimer = window.setInterval(() => void this.controller.automation(() => this.flushEditors()), this.settings.intervalMinutes * 60000);
   }
   async flushEditors(): Promise<void> {
-    const saves: Promise<void>[] = []; this.app.workspace.iterateAllLeaves(leaf => { if (leaf.view instanceof MarkdownView) saves.push(leaf.view.save()); }); await Promise.all(saves);
+    const saves: Promise<void>[] = [];
+    this.app.workspace.iterateAllLeaves(leaf => {
+      if (!(leaf.view instanceof MarkdownView) || !leaf.view.file) return;
+      const view = leaf.view, file = view.file!;
+      saves.push((async () => { const disk = await this.app.vault.read(file); if (disk.replace(/\r\n/g, '\n') !== view.editor.getValue().replace(/\r\n/g, '\n')) await view.save(); })());
+    }); await Promise.all(saves);
   }
   run<T>(label: string, work: () => Promise<T>): Promise<T | undefined> { return this.controller.run(label, work); }
   currentPath(): string | undefined { const file = this.app.workspace.getActiveFile(); return file && this.git.repo ? this.git.repoPath(file.path) : undefined; }
@@ -140,7 +189,7 @@ export default class GitPlus extends Plugin {
     }
     button(modal.contentEl, '添加远程', () => new PromptModal(this.app, '添加远程', [{ label: '名称', value: 'origin' }, { label: 'URL' }], values => this.run('添加远程', () => this.git.remote('add', values[0], values[1]))).open()); modal.open();
   }
-  onunload(): void { this.unloaded = true; if (this.autoTimer) window.clearInterval(this.autoTimer); this.controller?.dispose(); }
+  onunload(): void { this.unloaded = true; if (this.autoTimer) window.clearInterval(this.autoTimer); if (this.draftTimer) { clearTimeout(this.draftTimer); void this.persistSettings(); } this.controller?.dispose(); }
 }
 class GitPlusSettings extends PluginSettingTab {
   constructor(private plugin: GitPlus) { super(plugin.app, plugin); }
@@ -148,7 +197,11 @@ class GitPlusSettings extends PluginSettingTab {
     const parent = this.containerEl; parent.replaceChildren(); el(parent, 'h2', '', 'Git Plus');
     new Setting(parent).setName('Git 可执行文件').setDesc('使用系统 Git；修改后重新加载插件。').addText(text => text.setValue(this.plugin.settings.gitPath).onChange(async value => { this.plugin.settings.gitPath = value.trim() || 'git'; await this.plugin.persistSettings(); }));
     new Setting(parent).setName('环境诊断').setDesc('查看仓库路径、Git 版本、提交身份和认证配置。').addButton(b => b.setButtonText('检测').onClick(async () => this.plugin.previewText('Git 环境诊断', await this.plugin.git.diagnostics())));
-    for (const [key, name] of [['inlineBlame', '当前行修改归属'], ['fullBlame', '整篇逐行归属'], ['gutter', '编辑器变化标记']] as const) new Setting(parent).setName(name).addToggle(toggle => toggle.setValue(this.plugin.settings[key]).onChange(async value => { this.plugin.settings[key] = value; await this.plugin.persistSettings(); this.plugin.controller.emit(); }));
+    for (const [key, name, description] of [
+      ['inlineBlame', '当前行修改归属', '在光标所在行末尾，以灰色显示最后修改此行的作者、日期和提交摘要。悬停可查看提交与行差异；尚未提交或未保存的修改会显示对应状态。'],
+      ['fullBlame', '整篇逐行归属', '为整篇笔记的每一行显示最后修改者与提交信息，便于追溯不同段落的来源。优先于“当前行修改归属”；关闭后按“当前行修改归属”的设置显示。'],
+      ['gutter', '编辑器变化标记', '在行号旁标出相对 Git 暂存区新增、修改和删除的内容。'],
+    ] as const) new Setting(parent).setName(name).setDesc(description).addToggle(toggle => toggle.setValue(this.plugin.settings[key]).onChange(async value => { this.plugin.settings[key] = value; await this.plugin.persistSettings(); this.plugin.controller.emit(); }));
     el(parent, 'h3', '', '自动备份'); el(parent, 'p', 'gp-muted', '自动备份管理整个 Git 仓库，包含当前笔记库外文件。遇到冲突、分叉或认证失败会暂停。所有选项默认关闭。');
     for (const [key, name] of [['autoCommit', '定时暂存并提交全部变化'], ['autoSync', '定时提交并同步'], ['pullOnStartup', '启动时拉取（仅快进）']] as const) new Setting(parent).setName(name).addToggle(toggle => toggle.setValue(this.plugin.settings[key]).onChange(async value => { this.plugin.settings[key] = value; await this.plugin.persistSettings(); this.plugin.configureAutomation(); }));
     new Setting(parent).setName('周期（分钟）').addText(t => t.setValue(String(this.plugin.settings.intervalMinutes)).onChange(async value => { const n = Number(value); if (!Number.isFinite(n) || n < 1 || n > 1440) return; this.plugin.settings.intervalMinutes = n; await this.plugin.persistSettings(); this.plugin.configureAutomation(); }));

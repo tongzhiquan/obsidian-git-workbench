@@ -1,4 +1,5 @@
-import { ItemView, Menu, setIcon, type WorkspaceLeaf } from 'obsidian';
+import { ItemView, Menu, Notice, Scope, setIcon, type WorkspaceLeaf } from 'obsidian';
+import { EditorView } from '@codemirror/view';
 import type GitPlus from '../main';
 import { EMPTY, HEAD, INDEX, WORKTREE, type Commit, type GitRef, type LogFilter, type Revision } from '../types';
 import { layoutGraph, type GraphRow } from '../git/graph';
@@ -7,6 +8,8 @@ import { renderDiff } from './diff';
 import { renderConflict } from './conflict';
 import { GIT_PLUS_ICON } from './icon';
 import { HistoryFilePicker } from './file-picker';
+import { statusBadge } from './status';
+import { comparisonSelection } from './diff-selection';
 export const WORKBENCH = 'git-plus-workbench';
 type Tab = 'graph' | 'history' | 'diff' | 'conflict' | 'refs' | 'stash' | 'backups';
 export class WorkbenchView extends ItemView {
@@ -27,7 +30,28 @@ export class WorkbenchView extends ItemView {
   private graphGeneration = -1;
   private body!: HTMLElement;
   private statusLine?: HTMLElement;
-  constructor(leaf: WorkspaceLeaf, public plugin: GitPlus) { super(leaf); }
+  constructor(leaf: WorkspaceLeaf, public plugin: GitPlus) {
+    super(leaf); this.scope = new Scope(this.app.scope);
+    this.scope.register(['Mod'], 's', event => {
+      const save = this.contentEl.querySelector<HTMLButtonElement>('.gp-save-diff');
+      if (!save) return;
+      event.preventDefault(); save.click(); return false;
+    });
+    const focusedEditor = () => {
+      const node = this.contentEl.ownerDocument.activeElement?.closest('.cm-editor');
+      return node && this.contentEl.querySelector('.gp-merge-body')?.contains(node) ? EditorView.findFromDOM(node as HTMLElement) : undefined;
+    };
+    this.scope.register(['Mod'], 'a', event => {
+      const view = focusedEditor(); if (!view) return;
+      event.preventDefault(); view.dispatch({ selection: { anchor: 0, head: view.state.doc.length } }); return false;
+    });
+    this.scope.register(['Mod'], 'c', event => {
+      const view = focusedEditor(); if (!view) return;
+      const text = comparisonSelection(view);
+      if (!text) return;
+      event.preventDefault(); void navigator.clipboard.writeText(text).catch(error => new Notice(`复制失败：${error.message}`)); return false;
+    });
+  }
   getViewType(): string { return WORKBENCH; }
   getDisplayText(): string { return 'Git Plus'; }
   getIcon(): string { return GIT_PLUS_ICON; }
@@ -35,7 +59,8 @@ export class WorkbenchView extends ItemView {
     this.containerEl.addClass('gp-container');
     this.unsubscribe = this.plugin.controller.subscribe(() => {
       this.updateStatus();
-      if (this.loadedGeneration !== this.plugin.controller.generation && !this.plugin.controller.busy && this.tab !== 'conflict') void this.render();
+      const editingDiff = this.tab === 'diff' && ((this.right.kind === 'index' || this.right.kind === 'worktree') && this.plugin.drafts(this.right.kind).has(this.path) || !!this.contentEl.querySelector('.gp-merge-body')?.contains(this.contentEl.ownerDocument.activeElement));
+      if (this.loadedGeneration !== this.plugin.controller.generation && !this.plugin.controller.busy && this.tab !== 'conflict' && !editingDiff) void this.render();
     }); await this.render();
   }
   async onClose(): Promise<void> { this.unsubscribe?.(); this.token++; this.cleanups.forEach(d => d()); this.cleanups = []; }
@@ -122,7 +147,8 @@ export class WorkbenchView extends ItemView {
       el(parent, 'h4', '', `变更文件 · ${files.length}`);
       const box = el(parent, 'div', 'gp-changed-files');
       for (const file of files) {
-        const b = button(box, `${file.status}  ${file.path}`, () => this.plugin.openDiff(file.path, commit.parents.length ? { kind: 'commit', ref: commit.parents[0] } : EMPTY, { kind: 'commit', ref: commit.hash }, file.oldPath ?? file.path), 'gp-file-link');
+        const b = button(box, '', () => this.plugin.openDiff(file.path, commit.parents.length ? { kind: 'commit', ref: commit.parents[0] } : EMPTY, { kind: 'commit', ref: commit.hash }, file.oldPath ?? file.path), 'gp-file-link');
+        statusBadge(b, file.status); el(b, 'span', '', file.path);
         b.title = file.oldPath ? `${file.oldPath} → ${file.path}` : file.path;
       }
     } catch (e) { parent.replaceChildren(); empty(parent, '无法读取提交', message(e)); }
