@@ -100,7 +100,10 @@ module.exports = async ({ window, js, check, capture }) => {
   });
   await key('C'); await wait(() => !!window.__qaHistoryCopied);
   check(await run(() => window.__qaHistoryCopied === '# Git Plus' && !document.querySelector('.gp-save-diff')), 'unified history is copyable and has no save action');
-  await run(async () => { const p = app.plugins.plugins['git-plus']; await p.openDiff('笔记库/项目笔记.md', { kind: 'commit', ref: 'HEAD' }, { kind: 'commit', ref: 'HEAD~2' }); });
+  await run(async () => {
+    const p = app.plugins.plugins['git-plus'], history = await p.git.history('笔记库/项目笔记.md', 2);
+    await p.openDiff('笔记库/项目笔记.md', { kind: 'commit', ref: history[0].hash }, { kind: 'commit', ref: history[1].hash });
+  });
   await wait(() => !!document.querySelector('.cm-deletedChunk'));
   const oldText = await run(() => {
     const api = require('@codemirror/view'), view = api.EditorView.findFromDOM(document.querySelector('.gp-merge-body .cm-editor'));

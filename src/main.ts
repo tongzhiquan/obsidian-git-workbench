@@ -25,6 +25,7 @@ export default class GitPlus extends Plugin {
   async onload(): Promise<void> {
     if (!Platform.isDesktopApp || !(this.app.vault.adapter instanceof FileSystemAdapter)) { new Notice('Git Plus 需要桌面文件系统笔记库'); return; }
     const data = await this.loadData(); this.settings = { ...DEFAULT_SETTINGS, ...data?.settings };
+    if (this.settings.sourceControlLayout !== 'list') this.settings.sourceControlLayout = 'tree';
     for (const target of ['index', 'worktree'] as const) if (Array.isArray(data?.[`${target}Drafts`])) for (const entry of data[`${target}Drafts`]) {
       if (Array.isArray(entry) && typeof entry[0] === 'string' && typeof entry[1]?.text === 'string' && typeof entry[1]?.base?.text === 'string' && (target !== 'index' || typeof entry[1]?.base?.indexEntry === 'string')) this.drafts(target).set(entry[0], entry[1]);
     }

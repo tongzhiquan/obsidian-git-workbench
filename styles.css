@@ -136,31 +136,48 @@ button.gp-file-link:hover { color: var(--interactive-accent); background: var(--
 .gp-confirm-detail { white-space: pre-wrap; line-height: 1.7; }
 .gp-remote-row { padding: 14px 0; border-bottom: 1px solid var(--background-modifier-border); display: flex; gap: 8px; flex-wrap: wrap; }
 .gp-remote-row code { width: 100%; overflow-wrap: anywhere; font-size: 11px; }
-.gp-sc-header { padding: 12px; display: flex; align-items: center; gap: 5px; border-bottom: 1px solid var(--background-modifier-border); }
+.gp-sc-header { padding: 4px 8px; min-height: 32px; display: flex; align-items: center; gap: 2px; border-bottom: 1px solid var(--background-modifier-border); flex-shrink: 0; }
 .gp-sc-header strong { flex: 1; font-size: 12px; }
 button.gp-icon-button { padding: 2px 6px; height: 24px; background: transparent; box-shadow: none; border: 0; color: var(--text-muted); }
 button.gp-icon-button:hover { background: var(--background-modifier-hover); color: var(--text-normal); }
-.gp-sc-branch { padding: 12px 12px 4px; color: var(--interactive-accent); font-weight: 600; }
-.gp-sc-scope { font-size: 10px; color: var(--text-muted); padding: 0 12px; margin: 0 0 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.gp-commit-input { min-height: 85px; margin: 0 12px; width: calc(100% - 24px); font-size: 12px; resize: vertical; }
-.gp-commit-controls { padding: 8px 12px; display: flex; justify-content: space-between; align-items: center; }
-.gp-message-tools { display: flex; padding: 6px 12px 0; }
-.gp-message-tools button { height: 24px; font-size: 11px; }
-.gp-commit-controls { gap: 6px; flex-wrap: wrap; }
-.gp-amend-help { margin-right: auto; }
-.gp-amend { display: flex; align-items: center; gap: 6px; color: var(--text-muted); font-size: 11px; }
-.gp-amend input { margin: 0; }
+.gp-sc-repository { display: flex; align-items: center; gap: 6px; padding: 3px 8px; flex-shrink: 0; }
+.gp-sc-branch { display: flex; align-items: center; gap: 5px; color: var(--text-muted); min-width: 0; flex: 1; font-size: 11px; }
+.gp-sc-branch-name { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.gp-sc-tracking { white-space: nowrap; font-size: 10px; color: var(--text-faint); }
+.gp-sc-branch-icon, .gp-sc-file-icon, .gp-sc-folder-icon, .gp-sc-chevron { display: flex; align-items: center; flex-shrink: 0; color: var(--text-muted); }
+.gp-source-control svg { width: 14px; height: 14px; }
+.gp-sc-message { position: relative; margin: 2px 8px 0; flex-shrink: 0; }
+.gp-source-control .gp-commit-input { display: block; min-height: 38px; max-height: 96px; padding: 7px 30px 7px 8px; width: 100%; font-size: 12px; line-height: 20px; resize: none; margin: 0; }
+.gp-source-control .gp-fill-backup-message { position: absolute; top: 4px; right: 3px; padding: 3px; width: 23px; }
+.gp-commit-controls { margin: 6px 8px 8px; display: flex; align-items: stretch; flex-shrink: 0; }
+.gp-source-control .gp-submit { flex: 1; border-radius: 4px 0 0 4px; }
+.gp-source-control .gp-commit-menu { width: 26px; height: 28px; border-radius: 0 4px 4px 0; border-left: 1px solid color-mix(in srgb, var(--text-on-accent) 25%, transparent); background: var(--interactive-accent); color: var(--text-on-accent); }
+.gp-source-control .gp-commit-menu:hover { background: var(--interactive-accent-hover); color: var(--text-on-accent); }
+.gp-sc-notice { margin: 3px 8px; font-size: 11px; max-height: 80px; overflow: auto; flex-shrink: 0; }
 .gp-picker-heading { display: flex; align-items: center; gap: 8px; }
 .gp-picker-path { color: var(--text-muted); font-size: 11px; margin-top: 4px; overflow-wrap: anywhere; }
-.gp-sc-network { display: flex; gap: 5px; padding: 2px 12px 12px; }
-.gp-sc-network button { flex: 1; }
+.gp-sc-network { display: flex; gap: 1px; flex-shrink: 0; }
+.gp-sc-network .gp-icon-button { padding: 3px; width: 24px; }
 .gp-operation { background: color-mix(in srgb, #e9a34a 12%, transparent); padding: 10px 12px; display: flex; gap: 8px; flex-wrap: wrap; }
 .gp-operation strong { width: 100%; }
-.gp-sc-list { display: flex; flex: 1; min-height: 100px; overflow: hidden; }
-.gp-group-heading { padding: 0 12px; display: flex; align-items: center; justify-content: space-between; background: var(--background-secondary); font-size: 11px; }
-.gp-sc-file { display: flex; align-items: center; gap: 5px; padding: 0 10px; }
-.gp-sc-file .gp-file-link { flex: 1; min-width: 0; font-size: 11px; }
-.gp-sc-file:hover { background: var(--background-modifier-hover); }
+.gp-sc-list { display: flex; flex: 1; min-height: 100px; overflow: hidden; border-top: 1px solid var(--background-modifier-border); }
+.gp-group-heading, .gp-sc-folder, .gp-sc-file { display: flex; align-items: center; gap: 4px; padding: 0 8px; }
+.gp-group-heading { background: var(--background-secondary); font-size: 11px; }
+.gp-sc-folder { padding-left: calc(8px + min(var(--gp-depth, 0) * 14px, 84px)); }
+.gp-sc-file { padding-left: calc(26px + min(var(--gp-depth, 0) * 14px, 84px)); }
+.gp-source-control .gp-sc-toggle { display: flex; align-items: center; justify-content: flex-start; gap: 5px; flex: 1; min-width: 0; padding: 0; background: transparent; color: var(--text-normal); text-align: left; border: 0; border-radius: 0; font-size: 12px; height: 28px; }
+.gp-group-heading .gp-sc-toggle { font-weight: 600; font-size: 11px; }
+.gp-sc-row-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.gp-sc-count { font-size: 10px; color: var(--text-muted); padding: 0 5px; border-radius: 9px; background: var(--background-modifier-hover); min-width: 18px; text-align: center; }
+.gp-sc-file .gp-file-link { display: flex; align-items: center; justify-content: flex-start; gap: 6px; flex: 1; min-width: 0; font-size: 12px; padding: 0; }
+.gp-sc-filename { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.gp-sc-directory { font-size: 10px; color: var(--text-faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex-shrink: 2; }
+.gp-sc-list[data-layout="list"] .gp-sc-file { padding-left: 26px; }
+.gp-sc-file:hover, .gp-sc-folder:hover { background: var(--background-modifier-hover); }
+.gp-sc-stage { opacity: 0; pointer-events: none; }
+.gp-virtual-row:hover .gp-sc-stage, .gp-virtual-row:focus-within .gp-sc-stage { opacity: 1; pointer-events: auto; }
+.gp-sc-list button:focus-visible { outline: 2px solid var(--interactive-accent); outline-offset: -2px; }
+@media (hover: none) { .gp-sc-stage { opacity: 1; pointer-events: auto; } }
 .gp-file-status { color: var(--text-muted); width: 12px; font-size: 11px; }
 .gp-container { --gp-git-added: #387600; --gp-git-modified: #895503; --gp-git-deleted: #ad0707; --gp-git-renamed: #007166; --gp-git-copied: #006b94; --gp-git-conflict: #a45200; }
 .theme-dark .gp-container { --gp-git-added: #81b88b; --gp-git-modified: #e2c08d; --gp-git-deleted: #f08080; --gp-git-renamed: #73c991; --gp-git-copied: #78c5db; --gp-git-conflict: #efb36b; }

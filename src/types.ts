@@ -27,11 +27,13 @@ export interface Settings {
   version: 1; gitPath: string; inlineBlame: boolean; fullBlame: boolean; gutter: boolean;
   diffMode: 'split' | 'unified'; pageSize: number; autoCommit: boolean; autoSync: boolean;
   pullOnStartup: boolean; intervalMinutes: number; commitTemplate: string;
+  sourceControlLayout: 'tree' | 'list';
 }
 export const DEFAULT_SETTINGS: Settings = {
   version: 1, gitPath: 'git', inlineBlame: true, fullBlame: false, gutter: true,
   diffMode: 'split', pageSize: 200, autoCommit: false, autoSync: false,
   pullOnStartup: false, intervalMinutes: 10, commitTemplate: 'vault backup: {{date}}',
+  sourceControlLayout: 'tree',
 };
 export function revisionLabel(ref: Revision): string {
   return ref.kind === 'commit' ? ref.ref.slice(0, 12) : ({ index: '暂存区', worktree: '工作区', empty: '空版本' })[ref.kind];

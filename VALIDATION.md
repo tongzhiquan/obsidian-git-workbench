@@ -2,6 +2,17 @@
 
 验证日期：2026-10-15。环境：Windows、Node.js 24.9.0、Git 2.51.0.windows.1、Obsidian 1.14.4。
 
+## 2026-10-17 编辑器标记与源代码管理侧栏
+
+- `npm test`：38 项通过，包含真实 Git 集成，以及新增的目录分组、独立折叠、重命名/删除/特殊路径、CRLF、插入行与恢复原文的标记测试。
+- `npm run test:obsidian`：96 项隔离检查通过，插件运行时错误为 0。连续 7 次输入均在空闲延迟之前保留修改标记；插入、原生撤销、归属查询失败、暂存及取消暂存均正确刷新颜色。
+- 侧栏验证：默认目录树、列表文件名与父目录、切换时保留消息和选区、重载保持布局、同一文件在不同状态组独立折叠、目录批量暂存与取消暂存不创建提交、图标正确调用 Fetch / Pull / Push、更多菜单及状态分组开合。
+- 浅色 / 深色截图及 230px 窄侧栏通过检查，消息框初始高度小于 50px，顶部操作区低于 175px，窄侧栏图标可见且无横向溢出。
+- 截图：`.qa/git-plus-sidebar-tree-light.png`、`.qa/git-plus-sidebar-tree-dark.png`、`.qa/git-plus-sidebar-list.png`、`.qa/git-plus-sidebar-narrow.png`、`.qa/git-plus-live-gutter.png`。截图与临时测试仓库继续排除在源码提交之外。
+- 测试中的历史比较改为读取目标文件的实际历史 SHA，避免新增其他测试提交后固定 `HEAD~2` 恰好没有文件差异而产生误报。侧栏菜单明确使用所属窗口的文档，避免隔离测试或弹出窗口的焦点影响菜单位置。
+- 本轮在 Windows / Obsidian 1.14.4 实际运行；macOS、Linux 未实机验证。版本仍为 0.1.3，调整记录在更新日志“未发布”部分。
+- `npm run package`、`npm run install-local`、`npm run reload-local` 通过；真实笔记库只读复核确认新侧栏已加载为目录树、三个远程操作图标可见、控制器无错误。安装前后 HEAD、index、插件启用列表及插件设置/草稿文件的 SHA-256 均保持不变，安装的构建文件与文档和项目产物一致。
+
 ## 此前完整功能验收
 
 - `npm run typecheck` / `npm run build`：通过，当时生产文件约 152 KiB，宿主 Obsidian / CodeMirror 模块未打包。
