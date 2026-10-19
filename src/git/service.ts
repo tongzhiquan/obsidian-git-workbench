@@ -83,8 +83,9 @@ export class GitService {
       if (end) value.setDate(value.getDate() + 1);
       return Math.floor(value.getTime() / 1000) - (end ? 1 : 0);
     };
-    if (filter.since) args.push(`--since=@${dateTime(filter.since, false)}`);
-    if (filter.until) args.push(`--until=@${dateTime(filter.until, true)}`);
+    // Git's raw date format requires a timezone after the epoch seconds.
+    if (filter.since) args.push(`--since=@${dateTime(filter.since, false)} +0000`);
+    if (filter.until) args.push(`--until=@${dateTime(filter.until, true)} +0000`);
     args.push(...(filter.ref ? [await this.resolveRef(filter.ref)] : ['--all', 'HEAD']));
     if (filter.path) { this.path(filter.path); args.push('--', filter.path); }
     return parseLog(await this.runner.text(args));

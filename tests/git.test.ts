@@ -284,6 +284,21 @@ test('pagination, all-ref topology, filter dates and detached commit are preserv
     await f.runner.text(['switch', '--detach', page2[0].hash]); const detached = await f.seed('detached.md', 'detached\n', 'detached only'); assert.ok((await f.git.log()).some(c => c.hash === detached));
   } finally { await f.close(); }
 });
+test('date filters preserve exact bounds beyond 2038 without falling back to the current time', async () => {
+  const f = await fixture(); try {
+    let stream = '';
+    for (const [date, message] of [['2000-07-01T12:00:00Z', 'old date'], ['2050-07-01T12:00:00Z', 'future date']]) {
+      stream += `commit refs/heads/main\ncommitter Git Workbench QA <qa@example.com> ${Date.parse(date) / 1000} +0000\ndata ${Buffer.byteLength(message)}\n${message}\n\n`;
+    }
+    await f.runner.text(['fast-import', '--quiet'], { input: stream + 'done\n' });
+    const future = await f.git.resolveRef('HEAD'), old = await f.git.resolveRef('HEAD^');
+    assert.deepEqual((await f.git.log({ since: '2040-01-01', until: '2100-01-01' })).map(c => c.hash), [future]);
+    assert.deepEqual((await f.git.log({ until: '2040-01-01' })).map(c => c.hash), [old]);
+    assert.equal((await f.git.log({ since: '2100-01-01' })).length, 0);
+    assert.equal((await f.git.log({ since: '1990-01-01', until: '2100-01-01' })).length, 2);
+  } finally { await f.close(); }
+});
+
 test('automatic commits whole repository, leaves default idle and pauses on failed sync', async () => {
   const f = await fixture(true); const notices: string[] = []; const settings = { ...DEFAULT_SETTINGS }; const controller = new RepositoryController(f.git, settings, s=>notices.push(s));
   try {
