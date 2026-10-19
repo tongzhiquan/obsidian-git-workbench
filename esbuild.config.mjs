@@ -9,7 +9,7 @@ const config = {
   entryPoints: ['src/main.ts'], outfile: 'dist/main.js', bundle: true,
   platform: 'node', format: 'cjs', target: 'es2022', logLevel: 'info',
   external: ['obsidian', 'electron', '@codemirror/state', '@codemirror/view', '@codemirror/language', '@lezer/*'],
-  banner: { js: `/*! Git Plus\n${license}\nThird-party notices\n${thirdParty}\n*/` },
+  banner: { js: `/*! Git Workbench\n${license}\nThird-party notices\n${thirdParty}\n*/` },
 };
 if (process.argv.includes('--watch')) { const context = await esbuild.context(config); await context.watch(); }
 else await esbuild.build(config);

@@ -1,12 +1,12 @@
 import { ItemView, Menu, Notice, setIcon, setTooltip, type WorkspaceLeaf } from 'obsidian';
-import type GitPlus from '../main';
+import type GitWorkbench from '../main';
 import { EMPTY, HEAD, INDEX, WORKTREE, type FileStatus } from '../types';
 import { button, ConfirmModal, el, empty, virtualList } from './common';
-import { GIT_PLUS_ICON } from './icon';
+import { GIT_WORKBENCH_ICON } from './icon';
 import { formatCommitMessage } from '../commit-message';
 import { statusBadge } from './status';
 import { sourceRows, type SourceRow } from './source-tree';
-export const SOURCE_CONTROL = 'git-plus-source-control';
+export const SOURCE_CONTROL = 'git-workbench-source-control';
 export class SourceControlView extends ItemView {
   private unsubscribe?: () => void;
   private disposeList?: () => void;
@@ -15,10 +15,10 @@ export class SourceControlView extends ItemView {
   private amend = false;
   private collapsed = new Set<string>();
   private scrollTop = 0;
-  constructor(leaf: WorkspaceLeaf, public plugin: GitPlus) { super(leaf); }
+  constructor(leaf: WorkspaceLeaf, public plugin: GitWorkbench) { super(leaf); }
   getViewType(): string { return SOURCE_CONTROL; }
-  getDisplayText(): string { return 'Git Plus · 源代码管理'; }
-  getIcon(): string { return GIT_PLUS_ICON; }
+  getDisplayText(): string { return 'Git Workbench · 源代码管理'; }
+  getIcon(): string { return GIT_WORKBENCH_ICON; }
   async onOpen(): Promise<void> {
     this.containerEl.addClass('gp-container');
     this.unsubscribe = this.plugin.controller.subscribe(() => {
@@ -66,7 +66,7 @@ export class SourceControlView extends ItemView {
       this.renderFiles();
     }));
     menu.addSeparator();
-    menu.addItem(i => i.setTitle('打开 Git Plus 工作台').setIcon(GIT_PLUS_ICON).onClick(() => this.plugin.openWorkbench()));
+    menu.addItem(i => i.setTitle('打开 Git Workbench 工作台').setIcon(GIT_WORKBENCH_ICON).onClick(() => this.plugin.openWorkbench()));
     menu.addItem(i => i.setTitle('仓库操作…').setIcon('git-branch').onClick(() => this.plugin.repositoryMenu(anchor)));
     const rect = anchor.getBoundingClientRect(); menu.showAtPosition({ x: rect.right, y: rect.bottom }, anchor.ownerDocument);
   }
@@ -171,7 +171,7 @@ export class SourceControlView extends ItemView {
   }
   private stage(files: FileStatus[], unstage: boolean): Promise<unknown> {
     const paths = [...new Set(files.flatMap(f => f.oldPath ? [f.oldPath, f.path] : [f.path]))];
-    if (paths.some(path => this.plugin.indexDrafts.has(path) || this.plugin.worktreeDrafts.has(path))) { new Notice('请先保存或放弃这些文件的比较草稿，再调整暂存状态'); return Promise.resolve(); }
+    if (paths.some(path => this.plugin.indexEdits.has(path) || this.plugin.worktreeEdits.has(path))) { new Notice('请先保存比较器中的文件修改，再调整暂存状态'); return Promise.resolve(); }
     return this.plugin.run(unstage ? '取消暂存' : '暂存', async () => { if (!unstage) await this.plugin.flushEditors(); if (unstage) await this.plugin.git.unstage(paths); else await this.plugin.git.stage(paths); });
   }
 }

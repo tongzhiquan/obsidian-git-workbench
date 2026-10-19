@@ -15,4 +15,4 @@ const canonical = async path => {
   return process.platform === 'win32' ? actual.toLowerCase() : actual;
 };
 if (await canonical(reported) !== await canonical(vault)) throw new Error('CLI 返回的笔记库路径与目标不同，已停止重载。请检查同名笔记库。');
-console.log(await command('plugin:reload', 'id=git-plus'));
+console.log(await command('plugin:reload', 'id=git-workbench'));

@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, writeFile, readFile, rename, rm, stat } from 'node:fs/promises';
+import { mkdtemp, mkdir, writeFile, readFile, rename, rm, stat, readdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { GitService } from '../src/git/service';
@@ -11,11 +11,16 @@ import { HEAD, INDEX, WORKTREE } from '../src/types';
 import { RepositoryController } from '../src/controller';
 import { DEFAULT_SETTINGS } from '../src/types';
 async function fixture(nested = false) {
-  const root = await mkdtemp(join(tmpdir(), 'git-plus-test-')); await mkdir(join(root, '笔记库'), { recursive: true });
-  const runner = new GitRunner('git', root); await runner.text(['init', '--initial-branch=main']); await runner.text(['config', 'user.name', 'Git Plus 测试']); await runner.text(['config', 'user.email', 'test@example.com']); await runner.text(['config', 'core.autocrlf', 'false']);
+  const root = await mkdtemp(join(tmpdir(), 'git-workbench-test-')); await mkdir(join(root, '笔记库'), { recursive: true });
+  const runner = new GitRunner('git', root); await runner.text(['init', '--initial-branch=main']); await runner.text(['config', 'user.name', 'Git Workbench 测试']); await runner.text(['config', 'user.email', 'test@example.com']); await runner.text(['config', 'core.autocrlf', 'false']);
   const git = new GitService(nested ? join(root, '笔记库') : root); await git.discover();
   const seed = async (path: string, text: string, message = '初始提交') => { await writeFile(join(root, path), text); await git.stage([path]); await git.commit(message); return (await git.status()).head; };
   return { root, runner, git, seed, close: async () => { git.dispose(); runner.dispose(); await rm(root, { recursive: true, force: true }); } };
+}
+async function safetyCopies(git: GitService): Promise<{ id: string; path: string }[]> {
+  const root = join(git.repo!.gitDir, 'git-workbench-backups');
+  const names = await readdir(root);
+  return Promise.all(names.filter(name => name.endsWith('.json')).map(async name => JSON.parse(await readFile(join(root, name), 'utf8'))));
 }
 test('empty repository, nested vault mapping, initial commit and special paths', async () => {
   const f = await fixture(true); try {
@@ -147,18 +152,56 @@ test('history file picker candidates cover nested vault, outside files, deleted 
     const files = await f.git.historyFiles(); assert.ok(files.includes('笔记库/中文 空格.md')); assert.ok(files.includes('outside.md')); assert.ok(files.includes('deleted.md')); assert.ok(files.includes('pending.md')); assert.ok(!files.includes('secret.ignored')); assert.equal(files.length, new Set(files).size);
   } finally { await f.close(); }
 });
-test('backups restore exact bytes and discard retains staged content', async () => {
+test('discard preserves staged content and internal safety copies retain original bytes', async () => {
   const f = await fixture(); try {
     const hash = await f.seed('note.md', '一\r\n'); await writeFile(join(f.root, 'note.md'), '二\r\n'); await f.git.stage(['note.md']); await writeFile(join(f.root, 'note.md'), '三\r\n');
-    await f.git.discard(['note.md']); assert.equal(await readFile(join(f.root, 'note.md'), 'utf8'), '二\r\n'); const [backup] = await f.git.backups(); await f.git.restoreBackup(backup.id); assert.equal(await readFile(join(f.root, 'note.md'), 'utf8'), '三\r\n');
+    await f.git.discard(['note.md']); assert.equal(await readFile(join(f.root, 'note.md'), 'utf8'), '二\r\n'); const [backup] = await safetyCopies(f.git); assert.equal(await readFile(join(f.git.repo!.gitDir, 'git-workbench-backups', backup.id + '.bin'), 'utf8'), '三\r\n');
     await f.git.restoreFile('note.md', { kind: 'commit', ref: hash }); assert.equal(await readFile(join(f.root, 'note.md'), 'utf8'), '一\r\n'); assert.equal((await f.git.file('note.md', INDEX)).text, '二\r\n');
-    await writeFile(join(f.root, 'new.md'), '未跟踪'); await f.git.discard(['new.md']); await assert.rejects(stat(join(f.root, 'new.md'))); const item = (await f.git.backups()).find(b => b.path === 'new.md')!; await f.git.restoreBackup(item.id); assert.equal(await readFile(join(f.root, 'new.md'), 'utf8'), '未跟踪');
+    await writeFile(join(f.root, 'new.md'), '未跟踪'); await f.git.discard(['new.md']); await assert.rejects(stat(join(f.root, 'new.md'))); const item = (await safetyCopies(f.git)).find(b => b.path === 'new.md')!; assert.equal(await readFile(join(f.git.repo!.gitDir, 'git-workbench-backups', item.id + '.bin'), 'utf8'), '未跟踪');
+  } finally { await f.close(); }
+});
+test('blame marks notes before the first commit including unsaved CRLF and empty lines', async () => {
+  const f = await fixture(true); try {
+    const path = '笔记库/新笔记 中文.md', text = '第一行\r\n\r\n尚未保存\r\n';
+    const blame = await f.git.blame(path, text);
+    assert.deepEqual(blame.map(row => [row.line, row.text, row.uncommitted]), [[1, '第一行', true], [2, '', true], [3, '尚未保存', true], [4, '', true]]);
+    assert.ok(blame.every(row => /^0{40}$/.test(row.hash) && row.path === path && !row.author));
+    const preview = await f.git.lineChange(path, blame[2], text);
+    assert.equal(preview.label, '空版本 → 当前笔记'); assert.ok(preview.lines.some(row => row.kind === 'add' && row.text === '尚未保存' && row.selected));
+    assert.equal((await f.git.status()).head, '(initial)'); assert.equal((await f.git.file(path, WORKTREE)).exists, false);
+    assert.equal((await f.git.blame(path, ''))[0].uncommitted, true);
+  } finally { await f.close(); }
+});
+test('untracked and newly staged notes retain attribution and line previews without a commit', async () => {
+  const f = await fixture(); try {
+    const head = await f.seed('tracked.md', '原有笔记\n'), path = '新笔记 [x].md', text = '新建内容\n第二行';
+    await writeFile(join(f.root, path), text);
+    const pending = await f.git.blame(path);
+    assert.equal(pending.length, 2); assert.ok(pending.every(row => row.uncommitted));
+    assert.equal((await f.git.status()).files.find(file => file.path === path)?.untracked, true);
+    await f.git.stage([path]); const before = await f.git.file(path, INDEX);
+    const unsaved = await f.git.blame(path, text + '\n编辑器新增');
+    assert.equal(unsaved.length, 3); assert.ok(unsaved.every(row => row.uncommitted));
+    const preview = await f.git.lineChange(path, unsaved[2], text + '\n编辑器新增');
+    assert.ok(preview.lines.some(row => row.kind === 'add' && row.text === '编辑器新增' && row.selected));
+    assert.equal((await f.git.file(path, INDEX)).indexEntry, before.indexEntry); assert.equal((await f.git.file(path, WORKTREE)).text, text); assert.equal((await f.git.status()).head, head);
+  } finally { await f.close(); }
+});
+test('pending renames retain committed authors and compare unsaved lines against the old HEAD path', async () => {
+  const f = await fixture(); try {
+    const old = '旧笔记 空格.md', path = '新笔记 中文.md', text = '标题\n原有内容\n保留内容\n';
+    const head = await f.seed(old, text); await rename(join(f.root, old), join(f.root, path)); await f.git.stage([old, path]);
+    const blame = await f.git.blame(path, text.replace('原有内容', '未保存变化'));
+    assert.equal(blame[0].hash, head); assert.equal(blame[0].path, old); assert.equal(blame[1].uncommitted, true); assert.equal(blame[2].hash, head);
+    const preview = await f.git.lineChange(path, blame[1], text.replace('原有内容', '未保存变化'));
+    assert.deepEqual(preview.lines.map(row => [row.kind, row.text]), [['delete', '原有内容'], ['add', '未保存变化']]);
+    assert.equal((await f.git.status()).head, head); assert.equal((await f.git.blame(path))[0].hash, head);
   } finally { await f.close(); }
 });
 test('blame uses editor contents and marks modified lines uncommitted', async () => {
   const f = await fixture(); try {
-    const hash = await f.seed('note.md', '第一行\n第二行\n'); const rows = await f.git.blame('note.md', '第一行\n未保存的行\n'); assert.equal(rows.length, 2); assert.equal(rows[0].hash, hash); assert.equal(rows[1].uncommitted, true); assert.equal(rows[0].author, 'Git Plus 测试');
-    assert.deepEqual(await f.git.blame('new.md', '未跟踪'), []);
+    const hash = await f.seed('note.md', '第一行\n第二行\n'); const rows = await f.git.blame('note.md', '第一行\n未保存的行\n'); assert.equal(rows.length, 2); assert.equal(rows[0].hash, hash); assert.equal(rows[1].uncommitted, true); assert.equal(rows[0].author, 'Git Workbench 测试');
+    const [untracked] = await f.git.blame('new.md', '未跟踪'); assert.equal(untracked.uncommitted, true); assert.equal(untracked.text, '未跟踪');
   } finally { await f.close(); }
 });
 test('branches, tags, stash, merge graph and detached HEAD', async () => {
@@ -209,7 +252,7 @@ test('rebase conflicts continue; cherry-pick and revert support continuation', a
   } finally { await f.close(); }
 });
 test('remote fetch/push/pull and divergent pull failure never force pushes', async () => {
-  const f = await fixture(); const remote = await mkdtemp(join(tmpdir(), 'git-plus-remote-')); const cloneRoot = await mkdtemp(join(tmpdir(), 'git-plus-clone-')); const remoteRunner = new GitRunner('git', remote); const cloneRunner = new GitRunner('git', cloneRoot);
+  const f = await fixture(); const remote = await mkdtemp(join(tmpdir(), 'git-workbench-remote-')); const cloneRoot = await mkdtemp(join(tmpdir(), 'git-workbench-clone-')); const remoteRunner = new GitRunner('git', remote); const cloneRunner = new GitRunner('git', cloneRoot);
   try {
     await remoteRunner.text(['init', '--bare', '--initial-branch=main']); await f.seed('base.md', 'base\n'); await f.git.remote('add', 'origin', remote); await f.git.network('push', 'origin', 'main'); await f.git.testConnection('origin');
     await cloneRunner.text(['clone', remote, '.']); await cloneRunner.text(['config', 'user.name', 'remote']); await cloneRunner.text(['config', 'user.email', 'remote@example.com']);
@@ -223,9 +266,9 @@ test('binary, large files, command errors and repository lock', async () => {
   const f = await fixture(); try {
     await f.seed('base.md', 'base'); await writeFile(join(f.root, 'binary.bin'), Buffer.from([1, 0, 2])); await writeFile(join(f.root, 'large.md'), 'x'.repeat(2 * 1024 * 1024 + 1)); await f.git.stage(['binary.bin', 'large.md']); await f.git.commit('大文件');
     assert.equal((await f.git.file('binary.bin', HEAD)).binary, true); assert.equal((await f.git.file('large.md', HEAD)).large, true);
-    await assert.rejects(f.git.resolveRef('--help')); await writeFile(join(f.git.repo!.commonDir, 'git-plus.lock'), `${process.pid}:test`); await assert.rejects(f.git.stage(['base.md']), /另一个/); await rm(join(f.git.repo!.commonDir, 'git-plus.lock'));
+    await assert.rejects(f.git.resolveRef('--help')); await writeFile(join(f.git.repo!.commonDir, 'git-workbench.lock'), `${process.pid}:test`); await assert.rejects(f.git.stage(['base.md']), /另一个/); await rm(join(f.git.repo!.commonDir, 'git-workbench.lock'));
     await writeFile(join(f.git.repo!.gitDir, 'index.lock'), ''); await writeFile(join(f.root, 'base.md'), 'changed'); await assert.rejects(f.git.stage(['base.md']), /index.lock/); await rm(join(f.git.repo!.gitDir, 'index.lock'));
-    const broken = new GitRunner('git-plus-nonexistent', f.root); await assert.rejects(broken.text(['status']), /无法执行/); broken.dispose();
+    const broken = new GitRunner('git-workbench-nonexistent', f.root); await assert.rejects(broken.text(['status']), /无法执行/); broken.dispose();
   } finally { await f.close(); }
 });
 test('conflict parser and status preserve unusual filenames', () => {
@@ -237,7 +280,7 @@ test('pagination, all-ref topology, filter dates and detached commit are preserv
     await f.seed('note.md', 'first\n', 'initial');
     for (let n = 0; n < 7; n++) await f.seed('note.md', `value ${n}\n`, `entry ${n}`);
     const page1 = await f.git.log({}, 0, 3), page2 = await f.git.log({}, 3, 3); assert.equal(page1.length, 3); assert.equal(page2.length, 3); assert.equal(new Set([...page1, ...page2].map(c=>c.hash)).size, 6);
-    const graph = layoutGraph(page1); assert.ok(graph.at(-1)!.edges.length > 0); assert.equal((await f.git.log({ message: 'entry', author: 'Git Plus', since: '2000-01-01', until: '2100-01-01' })).length, 7);
+    const graph = layoutGraph(page1); assert.ok(graph.at(-1)!.edges.length > 0); assert.equal((await f.git.log({ message: 'entry', author: 'Git Workbench', since: '2000-01-01', until: '2100-01-01' })).length, 7);
     await f.runner.text(['switch', '--detach', page2[0].hash]); const detached = await f.seed('detached.md', 'detached\n', 'detached only'); assert.ok((await f.git.log()).some(c => c.hash === detached));
   } finally { await f.close(); }
 });
@@ -256,7 +299,7 @@ test('binary modify/delete conflict uses file-level resolution and backups', asy
     await writeFile(join(f.root, 'binary.bin'), Buffer.from([0, 1, 2])); await f.git.stage(['binary.bin']); await f.git.commit('binary base'); await f.git.branch('create', 'binary-change');
     await writeFile(join(f.root, 'binary.bin'), Buffer.from([0, 3, 4])); await f.git.stage(['binary.bin']); await f.git.commit('binary change'); await f.git.branch('switch', 'main'); await rm(join(f.root, 'binary.bin')); await f.git.stage(['binary.bin']); await f.git.commit('delete binary');
     await assert.rejects(f.git.integrate('merge', 'binary-change')); const conflict = await f.git.conflict('binary.bin'); assert.equal(conflict.fileLevel, true); assert.equal(conflict.ours.exists, false); assert.equal(conflict.theirs.binary, true);
-    await f.git.resolveConflict('binary.bin', 'theirs'); await f.git.continueOperation('merge'); assert.deepEqual(await readFile(join(f.root, 'binary.bin')), Buffer.from([0, 3, 4])); assert.ok((await f.git.backups()).length > 0);
+    await f.git.resolveConflict('binary.bin', 'theirs'); await f.git.continueOperation('merge'); assert.deepEqual(await readFile(join(f.root, 'binary.bin')), Buffer.from([0, 3, 4])); assert.ok((await safetyCopies(f.git)).length > 0);
   } finally { await f.close(); }
 });
 test('delete diff, no-final-newline, invalid utf8 and amend preserve correct content', async () => {

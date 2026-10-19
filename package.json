@@ -1,18 +1,18 @@
 {
-  "name": "obsidian-git-plus",
-  "version": "0.1.3",
+  "name": "obsidian-git-workbench",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
-  "description": "Git Plus: Obsidian 桌面 Git 工作台",
+  "description": "Git Workbench: Obsidian 桌面 Git 工作台",
   "author": "tongzhiquan (https://github.com/tongzhiquan)",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/tongzhiquan/obsidian-git-plus.git"
+    "url": "git+https://github.com/tongzhiquan/obsidian-git-workbench.git"
   },
-  "homepage": "https://github.com/tongzhiquan/obsidian-git-plus#readme",
+  "homepage": "https://github.com/tongzhiquan/obsidian-git-workbench#readme",
   "bugs": {
-    "url": "https://github.com/tongzhiquan/obsidian-git-plus/issues"
+    "url": "https://github.com/tongzhiquan/obsidian-git-workbench/issues"
   },
   "scripts": {
     "dev": "node esbuild.config.mjs --watch",

@@ -23,7 +23,7 @@ module.exports = async ({ js, check, capture }) => {
     return { added, changed, restored: view.contentEl.querySelectorAll('.gp-gutter-change').length };
   }); check(movement.added > 0 && movement.changed > 0 && movement.restored === 0, 'inserting lines moves markers immediately and restoring text clears only reverted changes');
   const failedBlame = await run(async () => {
-    const p = app.plugins.plugins['git-plus'], original = p.controller.blame, editor = app.workspace.activeLeaf.view.editor;
+    const p = app.plugins.plugins['git-workbench'], original = p.controller.blame, editor = app.workspace.activeLeaf.view.editor;
     p.controller.blame = async () => { throw new Error('QA unavailable blame'); };
     try {
       editor.replaceRange('待保存', { line: 0, ch: 1 }); await new Promise(r => setTimeout(r, 650));
@@ -39,7 +39,7 @@ module.exports = async ({ js, check, capture }) => {
     return editor.getValue() === window.__qaBeforeTyping && view.contentEl.querySelectorAll('.gp-gutter-change').length === 0;
   }); check(undo, 'native editor undo updates gutter markers immediately');
   const staging = await run(async () => {
-    const p = app.plugins.plugins['git-plus'], view = app.workspace.activeLeaf.view, editor = view.editor, path = p.git.repoPath(view.file.path);
+    const p = app.plugins.plugins['git-workbench'], view = app.workspace.activeLeaf.view, editor = view.editor, path = p.git.repoPath(view.file.path);
     editor.replaceRange('暂存测试', { line: 0, ch: 1 }); await p.flushEditors();
     await p.git.stage([path]); await p.controller.refresh();
     for (let i = 0; i < 60 && view.contentEl.querySelector('.gp-gutter-change'); i++) await new Promise(r => setTimeout(r, 30));
@@ -49,6 +49,6 @@ module.exports = async ({ js, check, capture }) => {
     const changed = !!view.contentEl.querySelector('.gp-gutter-change'); editor.setValue(window.__qaBeforeTyping);
     return clean && changed;
   }); check(staging, 'staging and unstaging refresh the cached baseline without reopening the editor');
-  await run(async () => { const p = app.plugins.plugins['git-plus']; await p.flushEditors(); await p.controller.refresh(); app.workspace.activeLeaf.view.editor.setCursor({ line: 0, ch: 1 }); await new Promise(r => setTimeout(r, 800)); });
-  await capture('git-plus-live-gutter.png');
+  await run(async () => { const p = app.plugins.plugins['git-workbench']; await p.flushEditors(); await p.controller.refresh(); app.workspace.activeLeaf.view.editor.setCursor({ line: 0, ch: 1 }); await new Promise(r => setTimeout(r, 800)); });
+  await capture('git-workbench-live-gutter.png');
 };

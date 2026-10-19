@@ -1,17 +1,17 @@
 import { ItemView, Menu, Notice, Scope, setIcon, type WorkspaceLeaf } from 'obsidian';
 import { EditorView } from '@codemirror/view';
-import type GitPlus from '../main';
+import type GitWorkbench from '../main';
 import { EMPTY, HEAD, INDEX, WORKTREE, type Commit, type GitRef, type LogFilter, type Revision } from '../types';
 import { layoutGraph, type GraphRow } from '../git/graph';
 import { button, ConfirmModal, date, el, empty, input, message, PromptModal, select, virtualList } from './common';
 import { renderDiff } from './diff';
 import { renderConflict } from './conflict';
-import { GIT_PLUS_ICON } from './icon';
+import { GIT_WORKBENCH_ICON } from './icon';
 import { HistoryFilePicker } from './file-picker';
 import { statusBadge } from './status';
 import { comparisonSelection } from './diff-selection';
-export const WORKBENCH = 'git-plus-workbench';
-type Tab = 'graph' | 'history' | 'diff' | 'conflict' | 'refs' | 'stash' | 'backups';
+export const WORKBENCH = 'git-workbench-workbench';
+type Tab = 'graph' | 'history' | 'diff' | 'conflict' | 'refs' | 'stash';
 export class WorkbenchView extends ItemView {
   tab: Tab = 'graph';
   path = '';
@@ -30,7 +30,7 @@ export class WorkbenchView extends ItemView {
   private graphGeneration = -1;
   private body!: HTMLElement;
   private statusLine?: HTMLElement;
-  constructor(leaf: WorkspaceLeaf, public plugin: GitPlus) {
+  constructor(leaf: WorkspaceLeaf, public plugin: GitWorkbench) {
     super(leaf); this.scope = new Scope(this.app.scope);
     this.scope.register(['Mod'], 's', event => {
       const save = this.contentEl.querySelector<HTMLButtonElement>('.gp-save-diff');
@@ -53,13 +53,13 @@ export class WorkbenchView extends ItemView {
     });
   }
   getViewType(): string { return WORKBENCH; }
-  getDisplayText(): string { return 'Git Plus'; }
-  getIcon(): string { return GIT_PLUS_ICON; }
+  getDisplayText(): string { return 'Git Workbench'; }
+  getIcon(): string { return GIT_WORKBENCH_ICON; }
   async onOpen(): Promise<void> {
     this.containerEl.addClass('gp-container');
     this.unsubscribe = this.plugin.controller.subscribe(() => {
       this.updateStatus();
-      const editingDiff = this.tab === 'diff' && ((this.right.kind === 'index' || this.right.kind === 'worktree') && this.plugin.drafts(this.right.kind).has(this.path) || !!this.contentEl.querySelector('.gp-merge-body')?.contains(this.contentEl.ownerDocument.activeElement));
+      const editingDiff = this.tab === 'diff' && ((this.right.kind === 'index' || this.right.kind === 'worktree') && this.plugin.edits(this.right.kind).has(this.path) || !!this.contentEl.querySelector('.gp-merge-body')?.contains(this.contentEl.ownerDocument.activeElement));
       if (this.loadedGeneration !== this.plugin.controller.generation && !this.plugin.controller.busy && this.tab !== 'conflict' && !editingDiff) void this.render();
     }); await this.render();
   }
@@ -76,12 +76,12 @@ export class WorkbenchView extends ItemView {
   async render(): Promise<void> {
     const token = ++this.token; this.cleanups.forEach(d => d()); this.cleanups = []; this.contentEl.replaceChildren(); this.contentEl.className = 'view-content gp-workbench';
     this.loadedGeneration = this.plugin.controller.generation;
-    const header = el(this.contentEl, 'header', 'gp-header'); const brand = el(header, 'div', 'gp-brand'); setIcon(el(brand, 'span', 'gp-brand-icon'), GIT_PLUS_ICON); el(brand, 'strong', '', 'Git Plus');
+    const header = el(this.contentEl, 'header', 'gp-header'); const brand = el(header, 'div', 'gp-brand'); setIcon(el(brand, 'span', 'gp-brand-icon'), GIT_WORKBENCH_ICON); el(brand, 'strong', '', 'Git Workbench');
     const root = this.plugin.git.repo?.root; el(brand, 'span', 'gp-root', root ? root.replace(/\\/g, '/').split('/').at(-1)! : '工作台');
     const actions = el(header, 'div', 'gp-actions'); button(actions, '源代码管理', () => this.plugin.openSourceControl()); button(actions, '刷新', () => this.plugin.controller.refresh()); button(actions, '仓库操作 ▾', ( ) => this.plugin.repositoryMenu(actions));
     this.statusLine = el(this.contentEl, 'div', 'gp-repo-status'); this.updateStatus(); if (root) this.statusLine.title = root;
     const tabs = el(this.contentEl, 'nav', 'gp-tabs');
-    for (const [key, label] of [['graph', '提交图'], ['history', '笔记历史'], ['diff', '版本比较'], ['refs', '分支与标签'], ['stash', 'Stash'], ['backups', '恢复备份']] as [Tab, string][]) button(tabs, label, async () => { if (key === 'history' && !this.path) this.path = this.plugin.currentPath() ?? ''; await this.show(key); }, this.tab === key ? 'is-active' : '');
+    for (const [key, label] of [['graph', '提交图'], ['history', '笔记历史'], ['diff', '版本比较'], ['refs', '分支与标签'], ['stash', 'Stash']] as [Tab, string][]) button(tabs, label, async () => { if (key === 'history' && !this.path) this.path = this.plugin.currentPath() ?? ''; await this.show(key); }, this.tab === key ? 'is-active' : '');
     if (this.tab === 'conflict') button(tabs, '解决冲突', () => {}, 'is-active');
     this.body = el(this.contentEl, 'div', 'gp-workbench-body');
     if (!this.plugin.git.repo) { empty(this.body, '将笔记库连接到 Git', this.plugin.controller.error || '检测当前笔记库及上级目录中的 Git 仓库。也可以在当前笔记库初始化新仓库。'); button(this.body, '初始化 Git 仓库', () => new ConfirmModal(this.app, '初始化 Git？', `在 ${this.plugin.git.vault} 创建 Git 仓库。`, () => this.plugin.run('初始化仓库', () => this.plugin.git.init())).open(), 'mod-cta'); return; }
@@ -92,7 +92,6 @@ export class WorkbenchView extends ItemView {
       else if (this.tab === 'conflict') { const conflict = await this.plugin.git.conflict(this.path); if (token === this.token) renderConflict(this.body, conflict, this.plugin); }
       else if (this.tab === 'refs') await this.renderRefs(token);
       else if (this.tab === 'stash') await this.renderStashes(token);
-      else await this.renderBackups(token);
     } catch (e) { if (token === this.token) empty(this.body, '无法加载', message(e)); }
   }
   private async renderGraph(token: number): Promise<void> {
@@ -215,17 +214,12 @@ export class WorkbenchView extends ItemView {
     menu.showAtPosition({ x: anchor.getBoundingClientRect().left, y: anchor.getBoundingClientRect().bottom });
   }
   private async renderStashes(token: number): Promise<void> {
-    const toolbar = el(this.body, 'div', 'gp-actions gp-toolbar'); button(toolbar, '保存当前变化到 Stash', () => new PromptModal(this.app, '保存 Stash', [{ label: '描述', value: 'Git Plus stash' }], values => this.plugin.run('保存 Stash', () => this.plugin.git.stash('save', values[0]))).open());
+    const toolbar = el(this.body, 'div', 'gp-actions gp-toolbar'); button(toolbar, '保存当前变化到 Stash', () => new PromptModal(this.app, '保存 Stash', [{ label: '描述', value: 'Git Workbench stash' }], values => this.plugin.run('保存 Stash', () => this.plugin.git.stash('save', values[0]))).open());
     const stashes = await this.plugin.git.stashes(); if (token !== this.token) return; if (!stashes.length) empty(this.body, '没有 Stash');
     for (const stash of stashes) {
       const row = el(this.body, 'div', 'gp-stash-row'); el(row, 'strong', '', stash.ref); el(row, 'span', '', stash.subject); const actions = el(row, 'div', 'gp-actions');
       button(actions, '查看内容', async () => { this.selectedHash = stash.hash; const panel = el(this.body, 'div', 'gp-stash-detail'); await this.detail(panel, stash.hash); });
       for (const [action, label] of [['apply', '应用'], ['pop', '应用并移除'], ['drop', '删除']] as const) button(actions, label, () => new ConfirmModal(this.app, `${label} Stash？`, `${stash.ref} · ${stash.subject}`, () => this.plugin.run(label + ' Stash', () => this.plugin.git.stash(action, stash.ref))).open());
     }
-  }
-  private async renderBackups(token: number): Promise<void> {
-    el(this.body, 'p', 'gp-muted gp-toolbar', '恢复历史版本、丢弃修改与解决冲突前的副本保存在 Git 元数据目录中，不参与提交。恢复备份也会先保存当前内容。');
-    const backups = await this.plugin.git.backups(); if (token !== this.token) return; if (!backups.length) empty(this.body, '暂无恢复备份');
-    for (const backup of backups) { const row = el(this.body, 'div', 'gp-backup-row'); const detail = el(row, 'div'); el(detail, 'strong', '', backup.path); el(detail, 'p', 'gp-muted', `${date(backup.created)} · ${backup.reason}${backup.exists ? '' : ' · 原文件不存在'}`); button(row, '恢复副本', () => new ConfirmModal(this.app, '恢复此副本？', backup.path, () => this.plugin.run('恢复备份', () => this.plugin.git.restoreBackup(backup.id))).open()); }
   }
 }

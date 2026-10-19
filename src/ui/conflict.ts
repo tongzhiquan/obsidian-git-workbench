@@ -1,8 +1,8 @@
-import type GitPlus from '../main';
+import type GitWorkbench from '../main';
 import type { Conflict } from '../types';
 import { conflictBlocks } from '../git/parsers';
 import { button, ConfirmModal, el } from './common';
-export function renderConflict(parent: HTMLElement, conflict: Conflict, plugin: GitPlus): void {
+export function renderConflict(parent: HTMLElement, conflict: Conflict, plugin: GitWorkbench): void {
   const header = el(parent, 'div', 'gp-diff-bar'); el(header, 'strong', 'gp-path', conflict.path); el(header, 'span', 'gp-danger', '冲突处理');
   el(parent, 'p', 'gp-conflict-help', '“当前侧 / 传入侧”对应 Git index stage 2 / 3；rebase 时当前侧通常是目标分支，传入侧是正在重放的提交。保存结果后会暂存此文件。');
   const sides = el(parent, 'div', 'gp-conflict-sides');

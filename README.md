@@ -1,8 +1,8 @@
-# Git Plus
+# Git Workbench
 
 面向 Obsidian 桌面端的 Git 工作台。将分支提交图、笔记历史、版本比较、逐行修改归属和日常 Git 操作放在同一个插件中。
 
-[项目仓库](https://github.com/tongzhiquan/obsidian-git-plus) · [问题反馈](https://github.com/tongzhiquan/obsidian-git-plus/issues)
+[项目仓库](https://github.com/tongzhiquan/obsidian-git-workbench) · [问题反馈](https://github.com/tongzhiquan/obsidian-git-workbench/issues)
 
 ## 使用要求
 
@@ -22,7 +22,6 @@
 - **分支与标签**：新建、切换、删除本地分支，创建 / 删除标签。提交图右键支持 cherry-pick / revert。仓库操作菜单包含 merge / 普通 rebase。
 - **Stash**：保存（含未跟踪文件）、查看、应用、pop 和删除。
 - **冲突**：查看共同基础、当前侧、传入侧，逐块采用一侧或双方，手动编辑并暂存结果；侧栏继续或中止当前操作。删除、二进制、大文件冲突使用文件级选择。
-- **恢复备份**：恢复历史版本、丢弃修改、解决冲突前保存副本；工作台可以恢复副本。副本位于 `.git/git-plus-backups`，不参与提交。
 
 默认管理完整仓库。笔记库在 Git 仓库子目录中时自动发现上级仓库，“库外”标记说明文件不属于当前笔记库。分支切换与远程同步作用于整个仓库。提交只提交暂存区，不自动暂存其他文件。
 
@@ -36,13 +35,17 @@
 
 版本输入使用分支 / 标签 / SHA 或 `:index`、`:worktree`、`:empty`。历史文件被重命名时，历史视图自动使用每个提交对应的路径。
 
+尚未跟踪、暂存新增及首次提交前的新笔记也显示灰色“未提交的修改”，悬停可查看当前行的新增内容；不会显示不存在的作者或提交 SHA。待提交的重命名保留原有行归属，已修改行的差异对比使用重命名前的版本。
+
 ### 编辑工作文件与暂存区
 
-从“未暂存 / 未跟踪”打开比较，右侧是工作文件（`:worktree`）。可直接编辑、粘贴和删除行，点击“保存工作文件”或 Ctrl/Cmd+S 写入磁盘；暂存快照保持原状，需要提交时再单独暂存。工作文件已删除时，右侧仍可输入文本，点击“重新创建文件”恢复为新的工作文件。保存会检查磁盘内容及其他已打开笔记的编辑状态，发现更新时保留草稿并拒绝覆盖。
+从“未暂存 / 未跟踪”打开比较，右侧是工作文件（`:worktree`）。可直接编辑、粘贴和删除行，点击工具栏的“保存工作文件”或 Ctrl/Cmd+S 写入磁盘；暂存快照保持原状，需要提交时再单独暂存。工作文件已删除时，右侧仍可输入文本，点击“重新创建文件”恢复为新的工作文件。保存会检查磁盘内容及其他已打开笔记的编辑状态，发现更新时拒绝覆盖，未保存的编辑仍留在当前比较器中。
 
 从“已暂存”文件打开比较，或点击“编辑暂存区”，右侧是待提交快照（`:index`），保留直接编辑暂存区的能力。点击“保存暂存区”或 Ctrl/Cmd+S 只更新暂存快照，不改工作文件、不创建提交。“打开文件”在 Obsidian 打开当前笔记库文件，库外文件使用系统默认应用打开。历史提交两侧保持只读，但可以拖选、Shift+方向键选择、Ctrl/Cmd+A 全选及 Ctrl/Cmd+C 复制。
 
-编辑支持中文输入、撤销/重做，在并排和统一模式均可保存。工作区和暂存区的草稿分别保存在插件本地 `data.json`，切换标签、关闭工作台、重载后重新比较同一文件可继续编辑；该文件包含个人设置及未保存文本，建议不要提交到公开仓库。使用“放弃草稿”清除对应草稿并读取当前内容。有草稿时先保存或放弃，再通过文件按钮调整暂存状态。其他操作改动同一文件后，旧草稿不会覆盖新内容：先复制需要保留的文本，再放弃草稿并重新比较。
+编辑支持中文输入、撤销/重做，在并排和统一模式均可保存。文件有未保存的修改时，名称前显示 `●`；使用普通保存按钮或 Ctrl/Cmd+S 保存。需要放弃修改时，点击工具栏“重新加载文件”，确认后读取已保存内容。修改仅在当前插件会话的编辑器内保留，不写入插件配置；重载插件或退出前请先保存需要保留的修改。暂存文件前也应先保存相应编辑。
+
+已移除独立的草稿管理和恢复备份页面。升级不会删除旧版本的编辑记录或 `.git/git-plus-backups` 中已有的副本，也不会自动把旧记录载入比较器；新的内部安全副本写入 `.git/git-workbench-backups`。Git 提交历史、文件历史恢复、Stash 以及备份格式提交消息仍按各自的 Git 操作使用。
 
 文本编辑支持 2 MiB 以内的普通 UTF-8 文本，保留比较时的 LF/CRLF、无末尾换行及执行权限。混合换行符、符号链接、二进制和大文件不提供文本编辑；冲突使用专门的冲突视图。暂存区编辑要求存在无冲突的普通文件快照，暂存删除通过文件级操作处理。
 
@@ -56,9 +59,9 @@
 
 定时提交、定时同步和启动拉取均默认关闭。启用后默认 10 分钟一次，操作完整仓库。
 
-自动同步顺序为保存打开的笔记、暂存全部变化、提交、fetch、仅快进 pull、push。遇到冲突、分叉、认证或网络错误暂停，在设置中处理原因后恢复。Git Plus 不提供强制推送。
+自动同步顺序为保存打开的笔记、暂存全部变化、提交、fetch、仅快进 pull、push。遇到冲突、分叉、认证或网络错误暂停，在设置中处理原因后恢复。Git Workbench 不提供强制推送。
 
-多个 Git Plus 窗口通过仓库锁避免并发写入；外部 Git 的锁仍由 Git 管理。原 Obsidian Git 与 Git Plus 的自动写操作应只由一个插件负责。
+多个 Git Workbench 窗口通过仓库锁避免并发写入；外部 Git 的锁仍由 Git 管理。原 Obsidian Git 与 Git Workbench 的自动写操作应只由一个插件负责。
 
 ## 构建与安装
 
@@ -73,22 +76,24 @@ npm run install-local -- "/path/to/your-vault"
 
 `dev` 运行 watch 构建，`typecheck` 只检查类型。构建输出在 `dist`，安装包在 `release`。
 
-个人路径保存在项目根目录的 `git-plus.local.json`，该文件已被 Git 忽略。复制 `git-plus.local.example.json` 后填入本机路径即可；Windows 的 JSON 路径推荐使用 `/`，或将 `\` 写成 `\\`。示例文件中的路径仅为占位，需要替换。真实笔记库不需要位于插件源码目录中，也不会包含在安装包里。
+个人路径保存在项目根目录的 `git-workbench.local.json`，该文件已被 Git 忽略。复制 `git-workbench.local.example.json` 后填入本机路径即可；Windows 的 JSON 路径推荐使用 `/`，或将 `\` 写成 `\\`。示例文件中的路径仅为占位，需要替换。真实笔记库不需要位于插件源码目录中，也不会包含在安装包里。旧的 `git-plus.local.json` 与 `GIT_PLUS_VAULT` 仍可使用；新名称优先。
 
 | 字段                   | 用途                                          | 环境变量覆盖             |
 | ---------------------- | --------------------------------------------- | ------------------------ |
-| `vaultPath`            | 安装、重载、只读仓库检查的笔记库              | `GIT_PLUS_VAULT`         |
+| `vaultPath`            | 安装、重载、只读仓库检查的笔记库              | `GIT_WORKBENCH_VAULT`    |
 | `obsidianAsar`         | 隔离 UI 测试所需的 Obsidian 应用包            | `OBSIDIAN_ASAR`          |
 | `obsidianLauncherAsar` | 隔离 UI 测试所需的启动器应用包                | `OBSIDIAN_LAUNCHER_ASAR` |
 | `obsidianCli`          | CLI 可执行文件；不填时从 PATH 查找 `obsidian` | `OBSIDIAN_CLI`           |
 
 笔记库路径的优先级是命令参数、环境变量、本地配置。没有配置时停止并提示，不使用源码内置的个人目录。相对路径基于项目根目录解析。配置好 `vaultPath` 后可直接运行 `npm run install-local`；`npm run check-vault` 只读取仓库发现、状态、提交和图布局。
 
-安装脚本从 `dist` 复制最近一次构建，先备份 `community-plugins.json`，关闭旧 `obsidian-git` 并启用 `git-plus`，保留旧插件文件及配置。升级保留 Git Plus 的用户设置。安装前的插件列表备份保存在插件目录的 `community-plugins.before-install-*.json`；确认当前启用列表正常且不需要回滚后可删除这些备份。
+安装脚本从 `dist` 复制最近一次构建，先备份 `community-plugins.json`，关闭旧 `obsidian-git` / `git-plus` 并启用 `git-workbench`，保留旧插件文件及配置。首次迁移复制旧设置，后续升级保留 Git Workbench 的用户设置。快捷键和工作区视图引用会更新为新 ID，修改前在插件目录保存对应备份。安装前的插件列表备份保存在插件目录的 `community-plugins.before-install-*.json`；确认当前启用列表正常且不需要回滚后可删除这些备份。
 
-已启用 Obsidian CLI 时，安装后运行 `npm run reload-local`，或手动执行 `obsidian vault="Your Vault" plugin:reload id=git-plus`。重载脚本先核对 CLI 返回的笔记库真实路径，避免误操作同名笔记库。CLI 不可用时在设置中停用再启用 Git Plus，或重载窗口。CLI 的注册、参数和开发者命令见 [Obsidian CLI 文档](https://help.obsidian.md/cli)。
+已启用 Obsidian CLI 时，安装后运行 `npm run reload-local`，或手动执行 `obsidian vault="Your Vault" plugin:reload id=git-workbench`。重载脚本先核对 CLI 返回的笔记库真实路径，避免误操作同名笔记库。CLI 不可用时在设置中停用再启用 Git Workbench，或重载窗口。CLI 的注册、参数和开发者命令见 [Obsidian CLI 文档](https://help.obsidian.md/cli)。
 
-手动安装：解压 `git-plus-x.x.x.zip`，将 `git-plus` 目录放到 `<vault>/.obsidian/plugins/`，在第三方插件中启用。
+手动安装：解压 `git-workbench-x.x.x.zip`，将 `git-workbench` 目录放到 `<vault>/.obsidian/plugins/`，在第三方插件中启用。
+
+项目原名 Git Plus，现更名为 Git Workbench，插件 ID、安装目录和命令前缀统一使用 `git-workbench`。本地安装脚本自动迁移旧 `git-plus` 的设置、快捷键和工作区视图，并停用旧插件；旧插件文件与已有安全副本保留。
 
 
 
@@ -110,5 +115,7 @@ diff：BSD-3-Clause；CodeMirror merge、commands 与 style-mod：MIT。发布�
 
 ## 更新记录
 
-参见 [CHANGELOG.md](CHANGELOG.md)。后续调整先记录在“未发布”，发布时按版本和日期归档；版本标签统一使用 `v` 前缀。
+参见 [CHANGELOG.md](CHANGELOG.md)。后续调整先记录在“未发布”，发布时按版本和日期归档。
 开发与发布约定见 [CONTRIBUTING.md](CONTRIBUTING.md)。
+
+GitHub Actions 在推送 `X.Y.Z` 或 `vX.Y.Z` 标签后自动校验版本、测试、构建并发布安装包；也可在 Actions 的 Release 页面输入已有标签手动运行。面向 Obsidian 社区目录时使用与 manifest 版本一致的 `X.Y.Z` 标签。发布步骤和附件清单见开发与发布约定。

@@ -1,11 +1,11 @@
-import { readFile, writeFile, mkdir, stat, lstat, realpath, unlink, readdir, open, rename, copyFile } from 'node:fs/promises';
+import { readFile, writeFile, mkdir, stat, lstat, realpath, unlink, open, rename, copyFile } from 'node:fs/promises';
 import { resolve, relative, dirname, join, isAbsolute, sep } from 'node:path';
 import { randomUUID, createHash } from 'node:crypto';
 import { createTwoFilesPatch } from 'diff';
 import { GitError, GitRunner } from './runner';
 import { LOG_FORMAT, commitFromFields, parseBlame, parseHistory, parseHunks, parseLog, parseStatus, conflictBlocks } from './parsers';
 import { lineChange } from './line-change';
-import { EMPTY, HEAD, INDEX, WORKTREE, type Backup, type BlameLine, type BlameChange, type ChangedFile, type Commit, type Conflict, type FileContent, type FileDiff, type GitRef, type LogFilter, type Operation, type Repository, type RepoStatus, type Revision, type Stash } from '../types';
+import { EMPTY, HEAD, INDEX, WORKTREE, type BlameLine, type BlameChange, type ChangedFile, type Commit, type Conflict, type FileContent, type FileDiff, type GitRef, type LogFilter, type Operation, type Repository, type RepoStatus, type Revision, type Stash } from '../types';
 
 const MAX_TEXT = 2 * 1024 * 1024;
 const missing = (): FileContent => ({ text: '', size: 0, binary: false, large: false, exists: false });
@@ -20,7 +20,7 @@ export class GitService {
   constructor(public vault: string, executable = 'git') { this.runner = new GitRunner(executable, vault); }
   async discover(): Promise<Repository | undefined> {
     const version = (await this.runner.text(['--version'])).trim();
-    const m = /(\d+)\.(\d+)/.exec(version); if (!m || +m[1] < 2 || (+m[1] === 2 && +m[2] < 30)) throw new Error('Git Plus 需要 Git 2.30 或以上版本');
+    const m = /(\d+)\.(\d+)/.exec(version); if (!m || +m[1] < 2 || (+m[1] === 2 && +m[2] < 30)) throw new Error('Git Workbench 需要 Git 2.30 或以上版本');
     try {
       const root = (await this.runner.text(['rev-parse', '--show-toplevel'])).trim();
       const gitDir = (await this.runner.text(['rev-parse', '--absolute-git-dir'])).trim();
@@ -143,11 +143,11 @@ export class GitService {
     if (text.includes('\0') || Buffer.byteLength(text) > MAX_TEXT) throw new Error('暂存区编辑仅支持 2 MiB 以内且不含 NUL 的文本');
     await this.runner.write(async () => {
       const index = resolve(this.root(), (await this.runner.text(['rev-parse', '--git-path', 'index'])).trim());
-      const lock = index + '.lock', temporary = index + '.git-plus-' + randomUUID();
-      const handle = await open(lock, 'wx').catch(error => { if (error.code === 'EEXIST') throw new Error('Git index.lock 已存在，请等待其他 Git 操作完成后重试；草稿已保留'); throw error; });
+      const lock = index + '.lock', temporary = index + '.git-workbench-' + randomUUID();
+      const handle = await open(lock, 'wx').catch(error => { if (error.code === 'EEXIST') throw new Error('Git index.lock 已存在，请等待其他 Git 操作完成后重试；未保存的编辑仍保留在比较器中'); throw error; });
       let installed = false;
       try {
-        if (await this.indexEntry(path) !== base.indexEntry) throw new Error('暂存区已被其他操作修改，未覆盖；请复制草稿后放弃草稿并刷新比较');
+        if (await this.indexEntry(path) !== base.indexEntry) throw new Error('暂存区已被其他操作修改，未覆盖；可复制未保存的编辑内容后重新加载文件');
         await copyFile(index, temporary);
         // The editor works on the blob itself: do not run worktree clean filters a second time.
         const object = (await this.runner.text(['hash-object', '-w', '--stdin', '--no-filters'], { input: text })).trim();
@@ -177,7 +177,7 @@ export class GitService {
     if (base.binary || base.large || text.includes('\0') || Buffer.byteLength(text) > MAX_TEXT) throw new Error('工作区编辑仅支持 2 MiB 以内的普通 UTF-8 文本');
     await this.runner.write(async () => {
       const absolute = await this.writablePath(path), current = await this.file(path, WORKTREE);
-      if (current.exists !== base.exists || current.binary || current.large || current.text !== base.text) throw new Error('工作区文件已被其他操作修改，未覆盖；草稿已保留，请重新比较');
+      if (current.exists !== base.exists || current.binary || current.large || current.text !== base.text) throw new Error('工作区文件已被其他操作修改，未覆盖；未保存的编辑仍保留在比较器中');
       if (writer) await writer();
       else { await mkdir(dirname(absolute), { recursive: true }); await writeFile(absolute, text, { flag: base.exists ? 'w' : 'wx' }); }
     });
@@ -205,31 +205,18 @@ export class GitService {
       await this.runner.text(['commit', ...(amend ? ['--amend'] : []), '--file=-'], { input: message });
     });
   }
-  async backup(path: string, reason: string): Promise<Backup> {
+  private async saveSafetyCopy(path: string, reason: string): Promise<void> {
     const absolute = await this.writablePath(path); const id = randomUUID();
     const bytes = await readFile(absolute).catch(e => { if (e.code === 'ENOENT') return undefined; throw e; });
-    const backup: Backup = { id, path, reason, created: new Date().toISOString(), exists: bytes !== undefined };
-    const root = join(this.repo!.gitDir, 'git-plus-backups'); await mkdir(root, { recursive: true });
+    const backup = { id, path, reason, created: new Date().toISOString(), exists: bytes !== undefined };
+    const root = join(this.repo!.gitDir, 'git-workbench-backups'); await mkdir(root, { recursive: true });
     if (bytes) await writeFile(join(root, id + '.bin'), bytes, { flag: 'wx' });
-    await writeFile(join(root, id + '.json'), JSON.stringify(backup), { flag: 'wx' }); return backup;
-  }
-  async backups(): Promise<Backup[]> {
-    const root = join(this.repo!.gitDir, 'git-plus-backups'); const names = await readdir(root).catch(e => { if (e.code === 'ENOENT') return []; throw e; });
-    return (await Promise.all(names.filter(n => n.endsWith('.json')).map(async n => JSON.parse(await readFile(join(root, n), 'utf8')) as Backup))).sort((a, b) => b.created.localeCompare(a.created));
-  }
-  async restoreBackup(id: string): Promise<void> {
-    if (!/^[\da-f-]{36}$/.test(id)) throw new Error('无效备份');
-    await this.runner.write(async () => {
-      const item = JSON.parse(await readFile(join(this.repo!.gitDir, 'git-plus-backups', id + '.json'), 'utf8')) as Backup;
-      const absolute = await this.writablePath(item.path); await this.backup(item.path, '恢复备份前');
-      if (item.exists) { await mkdir(dirname(absolute), { recursive: true }); await writeFile(absolute, await readFile(join(this.repo!.gitDir, 'git-plus-backups', id + '.bin'))); }
-      else await unlink(absolute).catch(e => { if (e.code !== 'ENOENT') throw e; });
-    });
+    await writeFile(join(root, id + '.json'), JSON.stringify(backup), { flag: 'wx' });
   }
   async restoreFile(path: string, ref: Revision, sourcePath = path): Promise<void> {
     await this.runner.write(async () => {
       const target = await this.file(sourcePath, ref); if (target.binary || target.large) throw new Error('此恢复操作仅支持 2 MiB 以内的文本文件');
-      const absolute = await this.writablePath(path); await this.backup(path, '恢复历史版本');
+      const absolute = await this.writablePath(path); await this.saveSafetyCopy(path, '恢复历史版本');
       if (target.exists) { await mkdir(dirname(absolute), { recursive: true }); await writeFile(absolute, target.text); }
       else await unlink(absolute).catch(e => { if (e.code !== 'ENOENT') throw e; });
     });
@@ -239,23 +226,52 @@ export class GitService {
       const status = await this.status();
       for (const path of paths) {
         const file = status.files.find(f => f.path === path); if (!file) continue; if (file.conflict || file.submodule) throw new Error('冲突或子模块请在专用操作中处理');
-        await this.backup(path, '丢弃工作区修改');
+        await this.saveSafetyCopy(path, '丢弃工作区修改');
         if (file.untracked) await unlink(this.path(path)); else await this.runner.text(['restore', '--worktree', '--', path]);
       }
     });
   }
   async blame(path: string, text?: string): Promise<BlameLine[]> {
-    this.path(path); if (!await this.hasHead()) return [];
-    try { return parseBlame(await this.runner.text(['blame', '--line-porcelain', ...(text !== undefined ? ['--contents', '-'] : []), '--', path], { input: text, maxBytes: 32 * 1024 * 1024 })); }
-    catch (e) { if (e instanceof GitError && /no such path|no such file|no such.*HEAD|no final newline|cannot stat/.test(e.message)) return []; throw e; }
+    this.path(path);
+    const contents = async (): Promise<string | undefined> => {
+      if (text !== undefined) return text;
+      const file = await this.file(path, WORKTREE);
+      return file.exists && !file.binary && !file.large ? file.text : undefined;
+    };
+    const uncommitted = async (): Promise<BlameLine[]> => {
+      const current = await contents();
+      if (current === undefined || current.includes('\0') || Buffer.byteLength(current) > MAX_TEXT) return [];
+      return current.split('\n').map((line, i) => ({ hash: '0'.repeat(40), author: '', date: 0, subject: '', originalLine: i + 1, line: i + 1, path, text: line.replace(/\r$/, ''), uncommitted: true }));
+    };
+    const read = async (source: string, input?: string) => parseBlame(await this.runner.text(['blame', '--line-porcelain', ...(input !== undefined ? ['--contents', '-'] : []), '--', source], { input, maxBytes: 32 * 1024 * 1024 }));
+    if (!await this.hasHead()) return uncommitted();
+    try { return await read(path, text); }
+    catch (e) {
+      if (!(e instanceof GitError)) throw e;
+      if (/no such path/.test(e.stderr)) {
+        // A new note has no committed author yet. A staged rename can still use
+        // its old HEAD path while blaming the current (possibly unsaved) text.
+        const renamed = (await this.status()).files.find(file => file.path === path && file.oldPath && (file.index === 'R' || file.worktree === 'R'));
+        const current = renamed ? await contents() : undefined;
+        if (renamed && current !== undefined) return read(renamed.oldPath!, current);
+        return uncommitted();
+      }
+      if (/no such file|no such.*HEAD|no final newline|cannot stat/.test(e.stderr)) return [];
+      throw e;
+    }
   }
   async lineChange(path: string, blame: BlameLine, contents?: string): Promise<BlameChange> {
     this.path(path);
     let before: FileContent, after: FileContent, number: number, label: string;
     if (blame.uncommitted) {
-      before = await this.file(path, await this.hasHead() ? HEAD : EMPTY);
+      const hasHead = await this.hasHead();
+      before = await this.file(blame.path || path, hasHead ? HEAD : EMPTY);
+      if (hasHead && !before.exists) {
+        const renamed = (await this.status()).files.find(file => file.path === path && file.oldPath && (file.index === 'R' || file.worktree === 'R'));
+        if (renamed) before = await this.file(renamed.oldPath!, HEAD);
+      }
       after = contents === undefined ? await this.file(path, WORKTREE) : content(Buffer.from(contents));
-      number = blame.line; label = 'HEAD → 当前笔记';
+      number = blame.line; label = `${hasHead ? 'HEAD' : '空版本'} → 当前笔记`;
     } else {
       const historicalPath = blame.path || path; this.path(historicalPath);
       const { commit, files } = await this.commitDetail(blame.hash);
@@ -302,7 +318,7 @@ export class GitService {
   }
   async stash(action: 'save' | 'apply' | 'pop' | 'drop', refOrMessage: string): Promise<void> {
     await this.runner.write(async () => {
-      if (action === 'save') await this.runner.text(['stash', 'push', '--include-untracked', '-m', refOrMessage || 'Git Plus stash']);
+      if (action === 'save') await this.runner.text(['stash', 'push', '--include-untracked', '-m', refOrMessage || 'Git Workbench stash']);
       else { if (!/^stash@\{\d+\}$/.test(refOrMessage)) throw new Error('无效 stash 引用'); await this.runner.text(['stash', action, refOrMessage]); }
     });
   }
@@ -342,7 +358,7 @@ export class GitService {
       const current = await this.conflict(path);
       if (expected !== undefined && current.result !== expected) throw new Error('冲突文件已被外部修改，请重新打开后处理');
       if (choice === 'result' && (text === undefined || conflictBlocks(text).length)) throw new Error('请先处理全部冲突标记');
-      await this.backup(path, '解决冲突前'); const absolute = await this.writablePath(path);
+      await this.saveSafetyCopy(path, '解决冲突前'); const absolute = await this.writablePath(path);
       if (choice === 'delete' || (choice !== 'result' && !current[choice].exists)) {
         await unlink(absolute).catch(e => { if (e.code !== 'ENOENT') throw e; }); await this.runner.text(['add', '-A', '--', path]);
       } else if (choice === 'result') { await mkdir(dirname(absolute), { recursive: true }); await writeFile(absolute, text!); await this.runner.text(['add', '--', path]); }

@@ -6,35 +6,35 @@ import { DEFAULT_SETTINGS, HEAD, INDEX, WORKTREE, type Operation, type Revision,
 import { WorkbenchView, WORKBENCH } from './ui/workbench';
 import { SourceControlView, SOURCE_CONTROL } from './ui/source-control';
 import { button, ConfirmModal, el, PromptModal } from './ui/common';
-import { GIT_PLUS_ICON, registerGitPlusIcon } from './ui/icon';
+import { GIT_WORKBENCH_ICON, registerGitWorkbenchIcon } from './ui/icon';
 import { formatCommitMessage } from './commit-message';
 import { shell } from 'electron';
-import type { EditTarget, FileContent, TextDraft } from './types';
-export default class GitPlus extends Plugin {
+import type { EditTarget, FileContent, PendingEdit } from './types';
+export default class GitWorkbench extends Plugin {
   settings: Settings = { ...DEFAULT_SETTINGS };
   git!: GitService;
   controller!: RepositoryController;
-  readonly indexDrafts = new Map<string, TextDraft>();
-  readonly worktreeDrafts = new Map<string, TextDraft>();
-  private draftTimer?: ReturnType<typeof setTimeout>;
+  readonly indexEdits = new Map<string, PendingEdit>();
+  readonly worktreeEdits = new Map<string, PendingEdit>();
+  private storedData: Record<string, unknown> = {};
   private statusBar?: HTMLElement;
   private autoTimer?: number;
   private saveTail: Promise<void> = Promise.resolve();
   private sourceControlOpening?: Promise<SourceControlView>;
   private unloaded = false;
   async onload(): Promise<void> {
-    if (!Platform.isDesktopApp || !(this.app.vault.adapter instanceof FileSystemAdapter)) { new Notice('Git Plus 需要桌面文件系统笔记库'); return; }
+    if (!Platform.isDesktopApp || !(this.app.vault.adapter instanceof FileSystemAdapter)) { new Notice('Git Workbench 需要桌面文件系统笔记库'); return; }
     const data = await this.loadData(); this.settings = { ...DEFAULT_SETTINGS, ...data?.settings };
     if (this.settings.sourceControlLayout !== 'list') this.settings.sourceControlLayout = 'tree';
-    for (const target of ['index', 'worktree'] as const) if (Array.isArray(data?.[`${target}Drafts`])) for (const entry of data[`${target}Drafts`]) {
-      if (Array.isArray(entry) && typeof entry[0] === 'string' && typeof entry[1]?.text === 'string' && typeof entry[1]?.base?.text === 'string' && (target !== 'index' || typeof entry[1]?.base?.indexEntry === 'string')) this.drafts(target).set(entry[0], entry[1]);
-    }
+    // Preserve legacy data without loading or updating the retired draft records.
+    // Editing content is now kept only in the current session until explicitly saved.
+    if (data && typeof data === 'object' && !Array.isArray(data)) this.storedData = { ...data };
     this.settings.pageSize = 200; this.settings.intervalMinutes = Math.max(1, Math.min(1440, Number(this.settings.intervalMinutes) || 10));
     this.git = new GitService(this.app.vault.adapter.getBasePath(), this.settings.gitPath);
     this.controller = new RepositoryController(this.git, this.settings, message => new Notice(message, 8000));
-    registerGitPlusIcon();
+    registerGitWorkbenchIcon();
     this.registerView(WORKBENCH, leaf => new WorkbenchView(leaf, this)); this.registerView(SOURCE_CONTROL, leaf => new SourceControlView(leaf, this));
-    this.addRibbonIcon(GIT_PLUS_ICON, 'Git Plus', () => void this.openWorkbench());
+    this.addRibbonIcon(GIT_WORKBENCH_ICON, 'Git Workbench', () => void this.openWorkbench());
     this.addCommand({ id: 'open-workbench', name: '打开 Git 工作台', callback: () => void this.openWorkbench() });
     this.addCommand({ id: 'open-source-control', name: '打开源代码管理', callback: () => void this.openSourceControl() });
     this.addCommand({ id: 'file-history', name: '当前笔记历史', callback: () => { const path = this.currentPath(); if (path) void this.openHistory(path); else new Notice('请先打开一篇笔记'); } });
@@ -48,9 +48,8 @@ export default class GitPlus extends Plugin {
     this.addCommand({ id: 'sync', name: '同步（Fetch / Pull / Push）', callback: () => void this.run('同步', async () => { await this.flushEditors(); await this.git.network('fetch'); await this.git.network('pull'); await this.git.network('push'); }) });
     this.addCommand({ id: 'refresh', name: '刷新仓库', callback: () => void this.controller.refresh() });
     this.addCommand({ id: 'toggle-blame', name: '切换整篇逐行归属', callback: () => { this.settings.fullBlame = !this.settings.fullBlame; void this.persistSettings(); this.controller.emit(); } });
-    this.addCommand({ id: 'backups', name: '查看恢复备份', callback: () => void this.openWorkbench('backups') });
     this.addCommand({ id: 'create-branch', name: '创建分支', callback: () => this.createBranch() });
-    this.addSettingTab(new GitPlusSettings(this));
+    this.addSettingTab(new GitWorkbenchSettings(this));
     this.registerEditorExtension(editorExtensions(this));
     this.registerEvent(this.app.vault.on('modify', () => this.controller.scheduleRefresh()));
     this.registerEvent(this.app.vault.on('create', () => this.controller.scheduleRefresh()));
@@ -59,18 +58,18 @@ export default class GitPlus extends Plugin {
     this.registerDomEvent(window, 'focus', () => void this.controller.refresh());
     this.registerEvent(this.app.workspace.on('file-menu', (menu, file) => {
       if (!(file instanceof TFile) || !this.git.repo) return; const path = this.git.repoPath(file.path); menu.addSeparator();
-      menu.addItem(i => i.setTitle('Git Plus · 文件历史').setIcon('history').onClick(() => void this.openHistory(path)));
-      menu.addItem(i => i.setTitle('Git Plus · 查看差异').setIcon('git-compare').onClick(() => void this.openDiff(path, INDEX, WORKTREE)));
-      menu.addItem(i => i.setTitle('Git Plus · 暂存文件').setIcon('plus').onClick(() => void this.run('暂存', async () => { await this.flushEditors(); await this.git.stage([path]); })));
+      menu.addItem(i => i.setTitle('Git Workbench · 文件历史').setIcon('history').onClick(() => void this.openHistory(path)));
+      menu.addItem(i => i.setTitle('Git Workbench · 查看差异').setIcon('git-compare').onClick(() => void this.openDiff(path, INDEX, WORKTREE)));
+      menu.addItem(i => i.setTitle('Git Workbench · 暂存文件').setIcon('plus').onClick(() => void this.run('暂存', async () => { await this.flushEditors(); await this.git.stage([path]); })));
     }));
     this.registerEvent(this.app.workspace.on('editor-menu', (menu, editor, info) => {
       if (!info.file || !this.git.repo) return; const path = this.git.repoPath(info.file.path); const line = editor.getCursor().line;
-      menu.addItem(i => i.setTitle('Git Plus · 此行最后一次提交').setIcon('git-commit-horizontal').onClick(async () => {
+      menu.addItem(i => i.setTitle('Git Workbench · 此行最后一次提交').setIcon('git-commit-horizontal').onClick(async () => {
         const blame = await this.controller.blame(path, editor.getValue()); const row = blame[line]; if (row && !row.uncommitted) await this.openCommit(row.hash); else new Notice('此行尚未提交');
       }));
     }));
     this.statusBar = this.addStatusBarItem(); this.statusBar.addClass('gp-statusbar'); this.statusBar.onclick = () => void this.openSourceControl();
-    const updateStatus = () => { const s = this.controller.status; if (this.statusBar) { this.statusBar.textContent = this.controller.busy ? '⑂ ' + this.controller.message : s ? `⑂ ${s.branch === '(detached)' ? s.head.slice(0, 7) : s.branch} · ${s.files.length} ↑${s.ahead} ↓${s.behind}` : '⑂ Git Plus'; this.statusBar.title = this.controller.error || this.git.repo?.root || '打开源代码管理'; } };
+    const updateStatus = () => { const s = this.controller.status; if (this.statusBar) { this.statusBar.textContent = this.controller.busy ? '⑂ ' + this.controller.message : s ? `⑂ ${s.branch === '(detached)' ? s.head.slice(0, 7) : s.branch} · ${s.files.length} ↑${s.ahead} ↓${s.behind}` : '⑂ Git Workbench'; this.statusBar.title = this.controller.error || this.git.repo?.root || '打开源代码管理'; } };
     const off = this.controller.subscribe(updateStatus); this.register(off); updateStatus();
     await this.controller.refresh(); this.configureAutomation();
     this.app.workspace.onLayoutReady(() => {
@@ -79,19 +78,14 @@ export default class GitPlus extends Plugin {
       if (this.settings.pullOnStartup && this.git.repo) void this.run('启动拉取', () => this.git.network('pull'));
     });
   }
-  persistSettings(): Promise<void> { const data = { settings: { ...this.settings }, indexDrafts: [...this.indexDrafts], worktreeDrafts: [...this.worktreeDrafts] }; this.saveTail = this.saveTail.catch(() => {}).then(() => this.saveData(data)); return this.saveTail; }
-  drafts(target: EditTarget): Map<string, TextDraft> { return target === 'index' ? this.indexDrafts : this.worktreeDrafts; }
-  setIndexDraft(path: string, draft?: TextDraft): void { this.setDiffDraft(path, 'index', draft); }
-  setDiffDraft(path: string, target: EditTarget, draft?: TextDraft): void {
-    if (draft) this.drafts(target).set(path, draft); else this.drafts(target).delete(path);
-    clearTimeout(this.draftTimer);
-    this.draftTimer = setTimeout(() => { this.draftTimer = undefined; void this.persistSettings().catch(error => new Notice(`比较编辑草稿保存失败：${error.message}`)); }, 300);
-  }
+  persistSettings(): Promise<void> { const data = { ...this.storedData, settings: { ...this.settings } }; this.saveTail = this.saveTail.catch(() => {}).then(() => this.saveData(data)); return this.saveTail; }
+  edits(target: EditTarget): Map<string, PendingEdit> { return target === 'index' ? this.indexEdits : this.worktreeEdits; }
+  setEdit(path: string, target: EditTarget, edit?: PendingEdit): void { if (edit) this.edits(target).set(path, edit); else this.edits(target).delete(path); }
   async saveWorkingFile(path: string, text: string, base: FileContent): Promise<void> {
     const relative = this.git.vaultPath(path), normal = (value: string) => value.replace(/\r\n/g, '\n');
     const checkEditors = () => {
       this.app.workspace.iterateAllLeaves(leaf => {
-        if (relative !== undefined && leaf.view instanceof MarkdownView && leaf.view.file?.path === relative && normal(leaf.view.editor.getValue()) !== normal(base.text)) throw new Error('此笔记的编辑器内容已变化，未覆盖；请先保存原笔记，再重新比较。比较草稿已保留');
+        if (relative !== undefined && leaf.view instanceof MarkdownView && leaf.view.file?.path === relative && normal(leaf.view.editor.getValue()) !== normal(base.text)) throw new Error('此笔记的编辑器内容已变化，未覆盖；请先保存原笔记，再重新比较。未保存的编辑内容仍保留在比较器中');
       });
     };
     checkEditors();
@@ -101,9 +95,9 @@ export default class GitPlus extends Plugin {
     await this.git.saveWorktree(path, text, base, !throughVault ? undefined : async () => {
       checkEditors(); const file = this.app.vault.getAbstractFileByPath(relative!);
       if (file instanceof TFile) {
-        await this.app.vault.process(file, current => { checkEditors(); if (current !== base.text || !base.exists) throw new Error('工作区文件已变化，草稿已保留，请重新比较'); return text; });
+        await this.app.vault.process(file, current => { checkEditors(); if (current !== base.text || !base.exists) throw new Error('工作区文件已变化，未保存的编辑内容仍保留在比较器中'); return text; });
       } else if (!base.exists) await this.app.vault.create(relative!, text);
-      else throw new Error('工作区文件已删除，草稿已保留，请重新比较');
+      else throw new Error('工作区文件已删除，未保存的编辑内容仍保留在比较器中');
     });
   }
   async openComparisonFile(path: string): Promise<void> {
@@ -131,7 +125,7 @@ export default class GitPlus extends Plugin {
   run<T>(label: string, work: () => Promise<T>): Promise<T | undefined> { return this.controller.run(label, work); }
   currentPath(): string | undefined { const file = this.app.workspace.getActiveFile(); return file && this.git.repo ? this.git.repoPath(file.path) : undefined; }
   backupMessage(): string { return formatCommitMessage(this.settings.commitTemplate); }
-  async openWorkbench(tab?: 'graph' | 'refs' | 'stash' | 'backups'): Promise<WorkbenchView> {
+  async openWorkbench(tab?: 'graph' | 'refs' | 'stash'): Promise<WorkbenchView> {
     let leaf = this.app.workspace.getLeavesOfType(WORKBENCH)[0]; if (!leaf) { leaf = this.app.workspace.getLeaf('tab'); await leaf.setViewState({ type: WORKBENCH, active: true }); }
     await this.app.workspace.revealLeaf(leaf); const view = leaf.view as WorkbenchView; if (tab) await view.show(tab); return view;
   }
@@ -190,12 +184,12 @@ export default class GitPlus extends Plugin {
     }
     button(modal.contentEl, '添加远程', () => new PromptModal(this.app, '添加远程', [{ label: '名称', value: 'origin' }, { label: 'URL' }], values => this.run('添加远程', () => this.git.remote('add', values[0], values[1]))).open()); modal.open();
   }
-  onunload(): void { this.unloaded = true; if (this.autoTimer) window.clearInterval(this.autoTimer); if (this.draftTimer) { clearTimeout(this.draftTimer); void this.persistSettings(); } this.controller?.dispose(); }
+  onunload(): void { this.unloaded = true; if (this.autoTimer) window.clearInterval(this.autoTimer); this.controller?.dispose(); }
 }
-class GitPlusSettings extends PluginSettingTab {
-  constructor(private plugin: GitPlus) { super(plugin.app, plugin); }
+class GitWorkbenchSettings extends PluginSettingTab {
+  constructor(private plugin: GitWorkbench) { super(plugin.app, plugin); }
   display(): void {
-    const parent = this.containerEl; parent.replaceChildren(); el(parent, 'h2', '', 'Git Plus');
+    const parent = this.containerEl; parent.replaceChildren(); el(parent, 'h2', '', 'Git Workbench');
     new Setting(parent).setName('Git 可执行文件').setDesc('使用系统 Git；修改后重新加载插件。').addText(text => text.setValue(this.plugin.settings.gitPath).onChange(async value => { this.plugin.settings.gitPath = value.trim() || 'git'; await this.plugin.persistSettings(); }));
     new Setting(parent).setName('环境诊断').setDesc('查看仓库路径、Git 版本、提交身份和认证配置。').addButton(b => b.setButtonText('检测').onClick(async () => this.plugin.previewText('Git 环境诊断', await this.plugin.git.diagnostics())));
     for (const [key, name, description] of [

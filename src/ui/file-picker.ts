@@ -1,9 +1,9 @@
 import { FuzzySuggestModal, Notice, type FuzzyMatch } from 'obsidian';
-import type GitPlus from '../main';
+import type GitWorkbench from '../main';
 import { el, message } from './common';
 
 export class HistoryFilePicker extends FuzzySuggestModal<string> {
-  constructor(private plugin: GitPlus, private paths: string[], private choose: (path: string) => Promise<void>) {
+  constructor(private plugin: GitWorkbench, private paths: string[], private choose: (path: string) => Promise<void>) {
     super(plugin.app);
     this.modalEl.addClass('gp-history-picker');
     this.setPlaceholder('搜索文件名或路径，选择后查看历史');

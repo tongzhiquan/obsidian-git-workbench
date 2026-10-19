@@ -19,7 +19,7 @@ export class GitRunner {
   disposed = false;
   constructor(public executable: string, public cwd: string, public commonDir?: string) {}
   async run(args: string[], options: RunOptions = {}): Promise<Buffer> {
-    if (this.disposed) throw new Error('Git Plus 已卸载');
+    if (this.disposed) throw new Error('Git Workbench 已卸载');
     return new Promise((resolve, reject) => {
       const child = spawn(this.executable, ['-c', 'core.quotepath=false', '-c', 'color.ui=false', ...args], {
         cwd: this.cwd, windowsHide: true, shell: false,
@@ -47,14 +47,14 @@ export class GitRunner {
   write<T>(action: () => Promise<T>): Promise<T> {
     const task = this.tail.catch(() => {}).then(async () => {
       if (!this.commonDir) return action();
-      const lock = join(this.commonDir, 'git-plus.lock'); const token = `${process.pid}:${Date.now()}:${Math.random()}`;
+      const lock = join(this.commonDir, 'git-workbench.lock'); const token = `${process.pid}:${Date.now()}:${Math.random()}`;
       try {
         const handle = await open(lock, 'wx'); await handle.writeFile(token); await handle.close();
       } catch (error) {
         if ((error as NodeJS.ErrnoException).code === 'EEXIST') {
           const previous = await readFile(lock, 'utf8'); const pid = Number(previous.split(':')[0]);
           let alive = true; try { process.kill(pid, 0); } catch (e) { alive = (e as NodeJS.ErrnoException).code !== 'ESRCH'; }
-          if (alive) throw new Error('另一个 Git Plus 窗口正在操作此仓库，请稍后重试');
+          if (alive) throw new Error('另一个 Git Workbench 窗口正在操作此仓库，请稍后重试');
           await unlink(lock); const handle = await open(lock, 'wx'); await handle.writeFile(token); await handle.close();
         } else throw error;
       }

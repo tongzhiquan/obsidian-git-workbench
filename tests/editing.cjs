@@ -5,7 +5,7 @@ module.exports = async ({ window, js, check, capture }) => {
   const wait = async fn => { for (let i = 0; i < 160; i++) { if (await run(fn)) return; await delay(40); } throw new Error('Editing UI did not settle'); };
   const key = async value => { window.webContents.sendInputEvent({ type: 'keyDown', keyCode: value, modifiers: ['control'] }); window.webContents.sendInputEvent({ type: 'keyUp', keyCode: value, modifiers: ['control'] }); await delay(120); };
   await run(async () => {
-    const p = app.plugins.plugins['git-plus'], path = '笔记库/比较测试.md', file = app.vault.getAbstractFileByPath('比较测试.md');
+    const p = app.plugins.plugins['git-workbench'], path = '笔记库/比较测试.md', file = app.vault.getAbstractFileByPath('比较测试.md');
     await p.git.stage([path]); window.__qaWorkingIndex = (await p.git.file(path, { kind: 'index' })).indexEntry; window.__qaWorkingHead = (await p.git.status()).head;
     await app.vault.modify(file, '工作文件原文\r\n第二行\r\n'); const leaf = app.workspace.getLeaf('tab'); await leaf.openFile(file); window.__qaWorkingLeaf = leaf;
     p.settings.diffMode = 'split'; await p.controller.refresh(); await p.openDiff(path, { kind: 'index' }, { kind: 'worktree' });
@@ -16,55 +16,56 @@ module.exports = async ({ window, js, check, capture }) => {
     view.dispatch({ changes: { from: 0, to: view.state.doc.line(1).to, insert: '从比较器保存到工作文件' } });
   });
   await wait(() => !document.querySelector('.gp-save-worktree').disabled);
-  await run(async () => {
-    const p = app.plugins.plugins['git-plus']; await p.persistSettings(); await app.plugins.disablePlugin('git-plus'); await app.plugins.enablePlugin('git-plus');
-    await app.plugins.plugins['git-plus'].openDiff('笔记库/比较测试.md', { kind: 'index' }, { kind: 'worktree' });
-  });
-  await wait(() => !!document.querySelector('.cm-merge-b') && !document.querySelector('.gp-save-worktree').disabled);
-  check(await run(() => app.plugins.plugins['git-plus'].worktreeDrafts.size === 1 && app.plugins.plugins['git-plus'].indexDrafts.size === 0 && require('@codemirror/view').EditorView.findFromDOM(document.querySelector('.cm-merge-b')).state.doc.line(1).text === '从比较器保存到工作文件'), 'working draft survives plugin reload independently of the staging area');
+  check(await run(async () => { const p = app.plugins.plugins['git-workbench']; await p.persistSettings(); return p.worktreeEdits.size === 1 && p.indexEdits.size === 0 && !JSON.stringify(await p.loadData()).includes('从比较器保存到工作文件'); }), 'working edits stay separate from staging and are not stored as persistent drafts');
   await run(() => document.querySelector('.gp-save-worktree').click());
-  await wait(() => !app.plugins.plugins['git-plus'].controller.busy && !app.plugins.plugins['git-plus'].worktreeDrafts.size);
+  await wait(() => !app.plugins.plugins['git-workbench'].controller.busy && !app.plugins.plugins['git-workbench'].worktreeEdits.size);
   const saved = await run(async () => {
-    const p = app.plugins.plugins['git-plus']; const text = (await p.git.file('笔记库/比较测试.md', { kind: 'worktree' })).text;
+    const p = app.plugins.plugins['git-workbench']; const text = (await p.git.file('笔记库/比较测试.md', { kind: 'worktree' })).text;
     return { text, index: (await p.git.file('笔记库/比较测试.md', { kind: 'index' })).indexEntry === window.__qaWorkingIndex, head: (await p.git.status()).head === window.__qaWorkingHead };
   });
   check(saved.text === '从比较器保存到工作文件\r\n第二行\r\n' && saved.index && saved.head, 'worktree editor saves exact text without staging or changing HEAD');
   await wait(() => window.__qaWorkingLeaf.view.editor.getValue().startsWith('从比较器保存到工作文件'));
   check(true, 'saving from comparison updates the already open Obsidian note');
+  await run(async () => {
+    await app.plugins.disablePlugin('git-workbench'); await app.plugins.enablePlugin('git-workbench');
+    await app.plugins.plugins['git-workbench'].openDiff('笔记库/比较测试.md', { kind: 'index' }, { kind: 'worktree' });
+  });
+  await wait(() => !!document.querySelector('.cm-merge-b'));
+  check(await run(() => !app.plugins.plugins['git-workbench'].worktreeEdits.size && require('@codemirror/view').EditorView.findFromDOM(document.querySelector('.cm-merge-b')).state.doc.line(1).text === '从比较器保存到工作文件'), 'reload displays saved working file content without a draft restore workflow');
   const protectedNote = await run(async () => {
-    const p = app.plugins.plugins['git-plus'], base = await p.git.file('笔记库/比较测试.md', { kind: 'worktree' });
+    const p = app.plugins.plugins['git-workbench'], base = await p.git.file('笔记库/比较测试.md', { kind: 'worktree' });
     const editor = window.__qaWorkingLeaf.view.editor; editor.replaceRange('原笔记中的新编辑', { line: 0, ch: 0 });
     let refused = false; try { await p.saveWorkingFile('笔记库/比较测试.md', '错误覆盖', base); } catch (error) { refused = /未覆盖|已变化/.test(error.message); }
     const kept = editor.getValue().startsWith('原笔记中的新编辑'); await window.__qaWorkingLeaf.view.save(); window.__qaWorkingLeaf.detach(); return refused && kept;
   });
   check(protectedNote, 'comparison refuses to overwrite newer edits in another note editor');
   await run(async () => {
-    const p = app.plugins.plugins['git-plus']; await app.vault.create('新建编辑.md', '未跟踪原文\n');
+    const p = app.plugins.plugins['git-workbench']; await app.vault.create('新建编辑.md', '未跟踪原文\n');
     await p.openDiff('笔记库/新建编辑.md', { kind: 'empty' }, { kind: 'worktree' });
     const view = require('@codemirror/view').EditorView.findFromDOM(document.querySelector('.cm-merge-b')); view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: '未跟踪文件可以编辑\n' } });
     window.__qaOriginalClipboardWrite = navigator.clipboard.writeText;
   });
   await wait(() => !document.querySelector('.gp-save-worktree').disabled); await run(() => document.querySelector('.gp-save-worktree').click());
-  await wait(() => !app.plugins.plugins['git-plus'].controller.busy && !app.plugins.plugins['git-plus'].worktreeDrafts.size);
-  check(await run(async () => { const p = app.plugins.plugins['git-plus']; return (await p.git.file('笔记库/新建编辑.md', { kind: 'worktree' })).text === '未跟踪文件可以编辑\n' && !(await p.git.file('笔记库/新建编辑.md', { kind: 'index' })).exists; }), 'untracked files can be edited while remaining untracked');
+  await wait(() => !app.plugins.plugins['git-workbench'].controller.busy && !app.plugins.plugins['git-workbench'].worktreeEdits.size);
+  check(await run(async () => { const p = app.plugins.plugins['git-workbench']; return (await p.git.file('笔记库/新建编辑.md', { kind: 'worktree' })).text === '未跟踪文件可以编辑\n' && !(await p.git.file('笔记库/新建编辑.md', { kind: 'index' })).exists; }), 'untracked files can be edited while remaining untracked');
   await run(async () => {
-    const p = app.plugins.plugins['git-plus']; await p.git.unstage(['笔记库/比较测试.md']);
+    const p = app.plugins.plugins['git-workbench']; await p.git.unstage(['笔记库/比较测试.md']);
     await app.vault.delete(app.vault.getAbstractFileByPath('比较测试.md')); await p.openDiff('笔记库/比较测试.md', { kind: 'index' }, { kind: 'worktree' });
     const view = require('@codemirror/view').EditorView.findFromDOM(document.querySelector('.cm-merge-b')); view.dispatch({ changes: { from: 0, insert: '从删除状态重新创建\n' } });
   });
   await wait(() => !document.querySelector('.gp-save-worktree').disabled); await run(() => document.querySelector('.gp-save-worktree').click());
-  await wait(() => !app.plugins.plugins['git-plus'].controller.busy && !app.plugins.plugins['git-plus'].worktreeDrafts.size);
-  check(await run(async () => (await app.plugins.plugins['git-plus'].git.file('笔记库/比较测试.md', { kind: 'worktree' })).text === '从删除状态重新创建\n'), 'deleted working files can be recreated by editing and saving');
+  await wait(() => !app.plugins.plugins['git-workbench'].controller.busy && !app.plugins.plugins['git-workbench'].worktreeEdits.size);
+  check(await run(async () => (await app.plugins.plugins['git-workbench'].git.file('笔记库/比较测试.md', { kind: 'worktree' })).text === '从删除状态重新创建\n'), 'deleted working files can be recreated by editing and saving');
   await run(async () => {
-    const p = app.plugins.plugins['git-plus']; await app.vault.adapter.write('.obsidian/qa-edit.json', '{"enabled":false}\n');
+    const p = app.plugins.plugins['git-workbench']; await app.vault.adapter.write('.obsidian/qa-edit.json', '{"enabled":false}\n');
     await p.openDiff('笔记库/.obsidian/qa-edit.json', { kind: 'empty' }, { kind: 'worktree' });
     const view = require('@codemirror/view').EditorView.findFromDOM(document.querySelector('.cm-merge-b')); view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: '{"enabled":true}\n' } });
   });
   await wait(() => !document.querySelector('.gp-save-worktree').disabled); await run(() => document.querySelector('.gp-save-worktree').click());
-  await wait(() => !app.plugins.plugins['git-plus'].controller.busy && !app.plugins.plugins['git-plus'].worktreeDrafts.size);
-  check(await run(async () => !app.vault.getAbstractFileByPath('.obsidian/qa-edit.json') && (await app.plugins.plugins['git-plus'].git.file('笔记库/.obsidian/qa-edit.json', { kind: 'worktree' })).text === '{"enabled":true}\n'), 'hidden configuration files outside the Vault file index can be edited safely');
+  await wait(() => !app.plugins.plugins['git-workbench'].controller.busy && !app.plugins.plugins['git-workbench'].worktreeEdits.size);
+  check(await run(async () => !app.vault.getAbstractFileByPath('.obsidian/qa-edit.json') && (await app.plugins.plugins['git-workbench'].git.file('笔记库/.obsidian/qa-edit.json', { kind: 'worktree' })).text === '{"enabled":true}\n'), 'hidden configuration files outside the Vault file index can be edited safely');
   await run(async () => {
-    const p = app.plugins.plugins['git-plus']; await p.openDiff('笔记库/项目笔记.md', { kind: 'commit', ref: 'HEAD^' }, { kind: 'commit', ref: 'HEAD' });
+    const p = app.plugins.plugins['git-workbench']; await p.openDiff('笔记库/项目笔记.md', { kind: 'commit', ref: 'HEAD^' }, { kind: 'commit', ref: 'HEAD' });
     Object.defineProperty(navigator.clipboard, 'writeText', { configurable: true, value: async text => { window.__qaHistoryCopied = text; } });
   });
   await wait(() => !!document.querySelector('.cm-merge-a'));
@@ -92,16 +93,16 @@ module.exports = async ({ window, js, check, capture }) => {
     window.webContents.sendInputEvent({ type: 'char', keyCode: 'x' }); await delay(100);
     check(await run(side => require('@codemirror/view').EditorView.findFromDOM(document.querySelector('.cm-merge-' + side)).state.sliceDoc(), side) === selected.full, 'history remains read-only after typing over the selection');
   }
-  await capture('git-plus-history-selection.png');
+  await capture('git-workbench-history-selection.png');
   await run(async () => {
-    const p = app.plugins.plugins['git-plus']; p.settings.diffMode = 'unified'; await p.persistSettings();
+    const p = app.plugins.plugins['git-workbench']; p.settings.diffMode = 'unified'; await p.persistSettings();
     await p.openDiff('笔记库/项目笔记.md', { kind: 'commit', ref: 'HEAD^' }, { kind: 'commit', ref: 'HEAD' });
-    const view = require('@codemirror/view').EditorView.findFromDOM(document.querySelector('.gp-merge-body .cm-editor')); view.focus(); view.dispatch({ selection: { anchor: 0, head: 10 } }); window.__qaHistoryCopied = null;
+    const view = require('@codemirror/view').EditorView.findFromDOM(document.querySelector('.gp-merge-body .cm-editor')); view.focus(); view.dispatch({ selection: { anchor: 0, head: view.state.doc.line(1).to } }); window.__qaHistoryCopied = null;
   });
   await key('C'); await wait(() => !!window.__qaHistoryCopied);
-  check(await run(() => window.__qaHistoryCopied === '# Git Plus' && !document.querySelector('.gp-save-diff')), 'unified history is copyable and has no save action');
+  check(await run(() => window.__qaHistoryCopied === '# Git Workbench' && !document.querySelector('.gp-save-diff')), 'unified history is copyable and has no save action');
   await run(async () => {
-    const p = app.plugins.plugins['git-plus'], history = await p.git.history('笔记库/项目笔记.md', 2);
+    const p = app.plugins.plugins['git-workbench'], history = await p.git.history('笔记库/项目笔记.md', 2);
     await p.openDiff('笔记库/项目笔记.md', { kind: 'commit', ref: history[0].hash }, { kind: 'commit', ref: history[1].hash });
   });
   await wait(() => !!document.querySelector('.cm-deletedChunk'));
@@ -114,7 +115,7 @@ module.exports = async ({ window, js, check, capture }) => {
   await key('C'); await wait(() => !!window.__qaHistoryCopied);
   check(await run(() => window.__qaHistoryCopied) === oldText, 'copying deleted historical text uses the selected old content instead of the newer document');
   await run(async () => {
-    const p = app.plugins.plugins['git-plus']; navigator.clipboard.writeText = window.__qaOriginalClipboardWrite;
+    const p = app.plugins.plugins['git-workbench']; navigator.clipboard.writeText = window.__qaOriginalClipboardWrite;
     await app.vault.create('颜色删除.md', 'delete\n'); await app.vault.create('颜色重命名.md', 'rename\n');
     await p.git.stage(['笔记库/颜色删除.md', '笔记库/颜色重命名.md']); await p.git.commit('QA 状态配色基准');
     await app.vault.delete(app.vault.getAbstractFileByPath('颜色删除.md'));
@@ -133,7 +134,7 @@ module.exports = async ({ window, js, check, capture }) => {
       list.scrollTop = 0; return found;
     });
     check(['added', 'modified', 'deleted', 'renamed', 'untracked'].every(kind => colors[kind]) && colors.added.color !== colors.modified.color && colors.modified.color !== colors.deleted.color && colors.untracked.letter === 'U' && colors.untracked.label.includes('未跟踪'), `${theme} theme renders semantic colors and labels for real Git status letters`);
-    await capture(`git-plus-status-${theme}.png`);
+    await capture(`git-workbench-status-${theme}.png`);
   }
-  await run(async () => { const p = app.plugins.plugins['git-plus']; await p.git.unstage(['笔记库/颜色新增.md', '笔记库/颜色重命名.md', '笔记库/颜色已重命名.md']); await p.controller.refresh(); });
+  await run(async () => { const p = app.plugins.plugins['git-workbench']; await p.git.unstage(['笔记库/颜色新增.md', '笔记库/颜色重命名.md', '笔记库/颜色已重命名.md']); await p.controller.refresh(); });
 };

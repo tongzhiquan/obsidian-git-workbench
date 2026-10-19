@@ -4,7 +4,7 @@ module.exports = async ({ window, js, check, capture }) => {
   const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
   const settle = async () => { await delay(100); };
   await run(async () => {
-    const p = app.plugins.plugins['git-plus'];
+    const p = app.plugins.plugins['git-workbench'];
     await app.vault.createFolder('目录测试/子目录');
     await app.vault.create('目录测试/子目录/第一篇.md', 'one\n'); await app.vault.create('目录测试/子目录/第二篇.md', 'two\n');
     await p.git.stage(['笔记库/目录测试/子目录/第一篇.md', '笔记库/目录测试/子目录/第二篇.md']);
@@ -26,7 +26,7 @@ module.exports = async ({ window, js, check, capture }) => {
     folder.click(); await new Promise(r => setTimeout(r, 50));
     const absent = ![...document.querySelectorAll('.gp-sc-file[data-group="worktree"]')].some(r => r.dataset.path.startsWith('笔记库/目录测试/'));
     const staged = !!document.querySelector('.gp-sc-file[data-group="index"][data-path="笔记库/目录测试/子目录/第一篇.md"]');
-    await app.plugins.plugins['git-plus'].controller.refresh();
+    await app.plugins.plugins['git-workbench'].controller.refresh();
     const persisted = document.querySelector('[data-folder="笔记库/目录测试"][data-group="worktree"] .gp-sc-toggle').getAttribute('aria-expanded') === 'false';
     document.querySelector('[data-folder="笔记库/目录测试"][data-group="worktree"] .gp-sc-toggle').click();
     return { absent, staged, persisted };
@@ -36,15 +36,15 @@ module.exports = async ({ window, js, check, capture }) => {
     document.querySelector('.gp-sc-layout').click(); await new Promise(r => setTimeout(r, 70));
     return input === document.querySelector('.gp-commit-input') && input.value === '未提交的消息' && input.selectionStart === 2 && input.selectionEnd === 4 && document.querySelector('.gp-sc-list').dataset.layout === 'list' && !document.querySelector('.gp-sc-folder') && !!document.querySelector('.gp-sc-directory');
   }); check(preserved, 'list toggle preserves composer node, draft and selection while showing filename plus directory');
-  await capture('git-plus-sidebar-list.png');
+  await capture('git-workbench-sidebar-list.png');
   const persisted = await run(async () => {
-    const p = app.plugins.plugins['git-plus']; await p.persistSettings(); await app.plugins.disablePlugin('git-plus'); await app.plugins.enablePlugin('git-plus');
+    const p = app.plugins.plugins['git-workbench']; await p.persistSettings(); await app.plugins.disablePlugin('git-workbench'); await app.plugins.enablePlugin('git-workbench');
     for (let i = 0; i < 80 && !document.querySelector('.gp-source-control'); i++) await new Promise(r => setTimeout(r, 30));
-    return app.plugins.plugins['git-plus'].settings.sourceControlLayout === 'list' && document.querySelector('.gp-sc-list').dataset.layout === 'list';
+    return app.plugins.plugins['git-workbench'].settings.sourceControlLayout === 'list' && document.querySelector('.gp-sc-list').dataset.layout === 'list';
   }); check(persisted, 'source control layout choice survives plugin reload');
   await run(() => document.querySelector('.gp-sc-layout').click()); await settle();
   const stagedFolder = await run(async () => {
-    const p = app.plugins.plugins['git-plus'];
+    const p = app.plugins.plugins['git-workbench'];
     const before = (await p.git.status()).head;
     document.querySelector('[data-folder="笔记库/目录测试"][data-group="worktree"] .gp-sc-stage').click();
     for (let i = 0; i < 100; i++) { await new Promise(r => setTimeout(r, 40)); if (!p.controller.busy && (await p.git.status()).files.filter(f => f.path.startsWith('笔记库/目录测试/') && f.worktree !== '.').length === 0) break; }
@@ -54,7 +54,7 @@ module.exports = async ({ window, js, check, capture }) => {
     return { staged, head: (await p.git.status()).head === before, unstaged: (await p.git.status()).files.filter(f => f.path.startsWith('笔记库/目录测试/') && f.worktree !== '.').length };
   }); check(stagedFolder.staged === 2 && stagedFolder.unstaged === 2 && stagedFolder.head, 'folder stage and unstage affect only descendant files and never create a commit');
   const actions = await run(async () => {
-    const p = app.plugins.plugins['git-plus'], original = p.network, invoked = [];
+    const p = app.plugins.plugins['git-workbench'], original = p.network, invoked = [];
     p.network = async action => { invoked.push(action); };
     try { for (const button of document.querySelectorAll('.gp-sc-network button')) button.click(); await new Promise(r => setTimeout(r, 50)); } finally { p.network = original; }
     return invoked;
@@ -72,7 +72,7 @@ module.exports = async ({ window, js, check, capture }) => {
   for (const theme of ['light', 'dark']) {
     await run(() => document.querySelectorAll('.notice').forEach(node => node.remove()));
     await run(theme => { document.body.toggleClass('theme-light', theme === 'light'); document.body.toggleClass('theme-dark', theme === 'dark'); }, theme);
-    await capture(`git-plus-sidebar-tree-${theme}.png`);
+    await capture(`git-workbench-sidebar-tree-${theme}.png`);
   }
   const narrow = await run(async () => {
     const side = app.workspace.rightSplit.containerEl, old = side.getAttribute('style');
@@ -80,6 +80,6 @@ module.exports = async ({ window, js, check, capture }) => {
     const panel = document.querySelector('.gp-source-control'), ok = panel.clientWidth <= 235 && panel.scrollWidth <= panel.clientWidth + 1 && [...panel.querySelectorAll('.gp-sc-header button, .gp-sc-network button')].every(node => node.getBoundingClientRect().width > 15);
     window.__qaSideStyle = old; return ok;
   }); check(narrow, 'narrow sidebar keeps toolbar icons visible without horizontal overflow');
-  await capture('git-plus-sidebar-narrow.png');
+  await capture('git-workbench-sidebar-narrow.png');
   await run(() => { const side = app.workspace.rightSplit.containerEl; if (window.__qaSideStyle === null) side.removeAttribute('style'); else side.setAttribute('style', window.__qaSideStyle); });
 };

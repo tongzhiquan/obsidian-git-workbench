@@ -24,7 +24,7 @@ export class BlamePopover {
   private openTimer?: ReturnType<typeof setTimeout>;
   private closeTimer?: ReturnType<typeof setTimeout>;
   private cleanups: (() => void)[] = [];
-  private readonly id = `git-plus-blame-${++nextId}`;
+  private readonly id = `git-workbench-blame-${++nextId}`;
   constructor(private host: PopoverHost, private doc: Document) {}
 
   hover(target: BlameTarget, pointer: Point): void {

@@ -13,7 +13,7 @@ export interface GitRef { name: string; fullName: string; hash: string; type: 'b
 export interface ChangedFile { path: string; oldPath?: string; status: string }
 export interface FileContent { text: string; size: number; binary: boolean; large: boolean; exists: boolean; indexEntry?: string }
 export type EditTarget = 'index' | 'worktree';
-export interface TextDraft { text: string; base: FileContent }
+export interface PendingEdit { text: string; base: FileContent }
 export interface DiffHunk { header: string; lines: string[]; patch: string; index: number }
 export interface FileDiff { path: string; oldPath: string; left: Revision; right: Revision; before: FileContent; after: FileContent; patch: string; hunks: DiffHunk[]; stageable: 'stage' | 'unstage' | null }
 export interface BlameLine { hash: string; author: string; date: number; subject: string; originalLine: number; line: number; path: string; text: string; uncommitted: boolean }
@@ -21,7 +21,6 @@ export interface BlameChangeLine { kind: 'add' | 'delete' | 'context'; text: str
 export interface BlameChange { label: string; lines: BlameChangeLine[]; truncated: boolean; notice?: string }
 export interface ConflictBlock { start: number; end: number; ours: string; theirs: string; base: string }
 export interface Conflict { path: string; base: FileContent; ours: FileContent; theirs: FileContent; result: string; blocks: ConflictBlock[]; fileLevel: boolean }
-export interface Backup { id: string; path: string; reason: string; created: string; exists: boolean }
 export interface Stash { ref: string; hash: string; subject: string }
 export interface Settings {
   version: 1; gitPath: string; inlineBlame: boolean; fullBlame: boolean; gutter: boolean;

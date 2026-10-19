@@ -1,7 +1,7 @@
 import { editorInfoField } from 'obsidian';
 import { StateEffect, type Extension } from '@codemirror/state';
 import { Decoration, EditorView, GutterMarker, ViewPlugin, WidgetType, gutter, type DecorationSet, type ViewUpdate } from '@codemirror/view';
-import type GitPlus from './main';
+import type GitWorkbench from './main';
 import { INDEX, type BlameLine } from './types';
 import { BlamePopover } from './ui/blame-popover';
 import { changeLines } from './editor-changes';
@@ -20,7 +20,7 @@ class ChangeMarker extends GutterMarker {
   eq(other: GutterMarker): boolean { return other instanceof ChangeMarker && other.kind === this.kind; }
   toDOM(): HTMLElement { const span = document.createElement('span'); span.className = 'gp-gutter-mark gp-gutter-' + this.kind; span.title = this.kind === 'add' ? '新增行' : this.kind === 'delete' ? '此处删除了行' : '修改行'; return span; }
 }
-export function editorExtensions(plugin: GitPlus): Extension {
+export function editorExtensions(plugin: GitWorkbench): Extension {
   const feature = ViewPlugin.fromClass(class {
     decorations: DecorationSet = Decoration.none;
     blame: BlameLine[] = [];

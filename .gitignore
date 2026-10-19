@@ -4,6 +4,7 @@ release/
 .qa/
 *.log
 git-plus.local.json
+git-workbench.local.json
 .env
 .env.*
 !.env.example
