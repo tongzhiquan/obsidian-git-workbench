@@ -1,10 +1,21 @@
 # 更新日志
 
-本项目参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/) 组织更新记录，版本号遵循语义化版本。Git 标签支持纯版本号（例如 `0.1.4`）与历史使用的 `v` 前缀（例如 `v0.1.3`）；社区目录发布使用纯版本号。
+按 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/) 记录用户可见变化，版本号遵循语义化版本。发布约定见 [开发指南](CONTRIBUTING.md)。
 
-每次功能调整随代码更新“未发布”部分；发布时将条目移至对应版本并填写日期。分类使用“新增、改进、修复、移除、弃用、安全”，仅保留有内容的分类。
+## [0.3.0] - 2026-10-21
 
-## 未发布
+### 新增
+
+- 并排和统一差异支持按行或多行暂存、取消暂存和工作文件还原，包括新增与删除文件。
+- 设置中新增“允许编辑已暂存文件”，默认关闭；开启后可在比较器编辑已暂存文件的工作文件或暂存快照。
+
+### 改进
+
+- 逐行操作成功后原地更新差异，保留光标、滚动和折叠状态，减少重复刷新与 Git 读取。
+- 比较列显示“只读 / 可编辑”状态，选区操作条按需显示。
+- 源代码管理标题栏增加工作台入口，位于更多菜单左侧，复用已有标签。
+- 精简使用、开发和设计文档，归档历史验证记录，修正过时说明。
+- 比较器的编辑命令与撤销/重做使用 Obsidian 内置实现，减少重复打包。
 
 ## [0.2.0] - 2026-10-19
 
@@ -56,5 +67,6 @@
 - 本地路径配置、构建与打包、CLI 重载、隔离仓库与 Obsidian 集成验证脚本。
 - MIT 许可证及第三方许可声明。
 
+[0.3.0]: https://github.com/tongzhiquan/obsidian-git-workbench/releases/tag/0.3.0
 [0.2.0]: https://github.com/tongzhiquan/obsidian-git-workbench/releases/tag/v0.2.0
 [0.1.3]: https://github.com/tongzhiquan/obsidian-git-workbench/releases/tag/v0.1.3

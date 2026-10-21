@@ -21,6 +21,16 @@ module.exports = async ({ window, js, check, capture }) => {
     return { height: list.top - side.top, network: [...document.querySelectorAll('.gp-sc-network button')].every(b => !b.textContent.trim() && b.querySelector('svg') && b.getAttribute('aria-label')), list: list.height, message: document.querySelector('.gp-commit-input').clientHeight };
   });
   check(compact.height < 175 && compact.message < 50 && compact.network && compact.list > 450, 'compact composer and icon-only remote actions leave most sidebar height for changes');
+  const opened = await run(async () => {
+    const header = document.querySelector('.gp-sc-header'), button = header.querySelector('.gp-sc-workbench');
+    const more = header.querySelector('.gp-sc-more');
+    const orderCorrect = button.nextElementSibling === more && more === header.lastElementChild, label = button.getAttribute('aria-label');
+    const leaf = app.workspace.getLeavesOfType('git-workbench-workbench')[0];
+    button.click(); await new Promise(r => setTimeout(r, 100)); button.click(); await new Promise(r => setTimeout(r, 100));
+    const leaves = app.workspace.getLeavesOfType('git-workbench-workbench');
+    return { orderCorrect, label, count: leaves.length, reused: leaves[0] === leaf, active: app.workspace.activeLeaf === leaf };
+  }); console.log('Source control workbench action', opened);
+  check(opened.orderCorrect && opened.label === '打开 Git Workbench 工作台' && opened.count === 1 && opened.reused && opened.active, 'workbench action sits immediately before the rightmost overflow menu and reuses the existing tab');
   const collapse = await run(async () => {
     const folder = document.querySelector('[data-folder="笔记库/目录测试"][data-group="worktree"] .gp-sc-toggle');
     folder.click(); await new Promise(r => setTimeout(r, 50));

@@ -23,25 +23,24 @@ async function fixture() {
   return { root, files, run, close: () => rm(root, { recursive: true, force: true }) };
 }
 
-test('release accepts plain and v-prefixed tags and extracts only the dated release notes', async () => {
+test('release accepts an exact version tag and extracts only the dated release notes', async () => {
   const f = await fixture();
   try {
-    for (const tag of ['1.2.3', 'v1.2.3']) {
-      const result = f.run(tag);
-      assert.equal(result.status, 0, result.stderr);
-      assert.equal(await readFile(join(f.root, 'notes.md'), 'utf8'), '### 新增\n\n- Release feature.\n');
-    }
+    const result = f.run('1.2.3');
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(await readFile(join(f.root, 'notes.md'), 'utf8'), '### 新增\n\n- Release feature.\n');
     assert.match(await readFile(join(f.root, 'outputs'), 'utf8'), /version=1\.2\.3\narchive=git-workbench-1\.2\.3\.zip\n/);
   } finally { await f.close(); }
 });
 
 test('release rejects mismatched tags and metadata before producing notes', async () => {
   const cases: [string, string, unknown, RegExp][] = [
-    ['v9.9.9', 'package.json', { name: 'obsidian-git-workbench', version: '1.2.3' }, /does not match/],
-    ['v1.2.3', 'package.json', { name: 'obsidian-git-workbench', version: '1.2.4' }, /versions must match/],
-    ['v1.2.3', 'package-lock.json', { version: '1.2.3', packages: { '': { version: '1.2.4' } } }, /versions must match/],
-    ['v1.2.3', 'versions.json', { '1.2.3': '1.0.0' }, /versions.json must map/],
-    ['v1.2.3', 'manifest.json', { id: 'git-plus', version: '1.2.3', minAppVersion: '1.14.4' }, /names must match/],
+    ['v1.2.3', 'package.json', { name: 'obsidian-git-workbench', version: '1.2.3' }, /without a v prefix/],
+    ['9.9.9', 'package.json', { name: 'obsidian-git-workbench', version: '1.2.3' }, /does not match/],
+    ['1.2.3', 'package.json', { name: 'obsidian-git-workbench', version: '1.2.4' }, /versions must match/],
+    ['1.2.3', 'package-lock.json', { version: '1.2.3', packages: { '': { version: '1.2.4' } } }, /versions must match/],
+    ['1.2.3', 'versions.json', { '1.2.3': '1.0.0' }, /versions.json must map/],
+    ['1.2.3', 'manifest.json', { id: 'git-plus', version: '1.2.3', minAppVersion: '1.14.4' }, /names must match/],
     ['v1.2.3-beta.1', 'manifest.json', { id: 'git-workbench', version: '1.2.3-beta.1' }, /stable X.Y.Z/],
   ];
   for (const [tag, file, value, error] of cases) {

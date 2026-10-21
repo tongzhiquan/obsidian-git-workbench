@@ -15,7 +15,42 @@ module.exports = async ({ window, js, check, capture }) => {
     window.__qaIndexWorktree = (await p.git.file('笔记库/比较测试.md', { kind: 'worktree' })).text;
   });
   await pause(800); await wait(() => !!document.querySelector('.gp-merge-body .cm-merge-b .cm-content'));
-  check(await run(() => { const api = require('@codemirror/view').EditorView; return api.findFromDOM(document.querySelector('.cm-merge-a')).state.readOnly && !api.findFromDOM(document.querySelector('.cm-merge-b')).state.readOnly && !document.querySelector('.gp-hunk-tools') && !document.querySelector('.cm-merge-revert') && document.querySelector('.gp-save-index').disabled; }), 'comparison shows editable index and selectable read-only original without hunk stage controls');
+  check(await run(() => {
+    const p = app.plugins.plugins['git-workbench'], api = require('@codemirror/view').EditorView;
+    return !p.settings.allowEditingStagedFiles && api.findFromDOM(document.querySelector('.cm-merge-b')).state.readOnly && !document.querySelector('.gp-save-index') && [...document.querySelectorAll('.gp-diff-columns > span')].every(column => column.textContent.endsWith(' · 只读'));
+  }), 'staged comparison defaults to read-only and column labels match its actual permissions');
+  // Exercise the registered settings tab directly: Obsidian may host Settings in another window.
+  await run(() => { const tab = app.setting.pluginTabs.find(tab => tab.id === 'git-workbench'); tab.display(); window.__qaSettingsTab = tab; });
+  await wait(() => [...window.__qaSettingsTab.containerEl.querySelectorAll('.setting-item')].some(row => row.querySelector('.setting-item-name')?.textContent === '允许编辑已暂存文件'));
+  await run(() => [...window.__qaSettingsTab.containerEl.querySelectorAll('.setting-item')].find(row => row.querySelector('.setting-item-name')?.textContent === '允许编辑已暂存文件').querySelector('.checkbox-container').dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })));
+  await wait(() => app.plugins.plugins['git-workbench'].settings.allowEditingStagedFiles);
+  await wait(async () => (await app.plugins.plugins['git-workbench'].loadData()).settings.allowEditingStagedFiles);
+  await run(async () => { const p = app.plugins.plugins['git-workbench']; await p.controller.refresh(); await p.openDiff('笔记库/比较测试.md', { kind: 'commit', ref: 'HEAD' }, { kind: 'index' }); });
+  await wait(() => { const node = document.querySelector('.cm-merge-b'); return !!node && !require('@codemirror/view').EditorView.findFromDOM(node).state.readOnly && !!document.querySelector('.gp-save-index'); });
+  check(await run(async () => (await app.plugins.plugins['git-workbench'].loadData()).settings.allowEditingStagedFiles), 'settings toggle enables staged editing and persists the explicit opt-in');
+  // Renderer require resolves the development package; exercise host history via native keys.
+  const pendingEdit = await run(() => {
+    const view = require('@codemirror/view').EditorView.findFromDOM(document.querySelector('.cm-merge-b'));
+    window.__qaBeforeHostUndo = view.state.sliceDoc();
+    view.dispatch({ changes: { from: 0, insert: '宿主撤销验证' } }); view.focus();
+    return app.plugins.plugins['git-workbench'].indexEdits.size === 1;
+  });
+  check(pendingEdit, 'comparison records edits before exercising native host undo and redo');
+  const historyKey = async code => {
+    window.focus();
+    window.webContents.sendInputEvent({ type: 'keyDown', keyCode: code, modifiers: ['control'] });
+    window.webContents.sendInputEvent({ type: 'keyUp', keyCode: code, modifiers: ['control'] });
+    await pause(100);
+  };
+  await historyKey('Z');
+  await wait(() => require('@codemirror/view').EditorView.findFromDOM(document.querySelector('.cm-merge-b')).state.sliceDoc() === window.__qaBeforeHostUndo);
+  check(await run(() => !app.plugins.plugins['git-workbench'].indexEdits.size), 'native Ctrl+Z undoes comparison edits through host history');
+  await historyKey('Y');
+  await wait(() => require('@codemirror/view').EditorView.findFromDOM(document.querySelector('.cm-merge-b')).state.sliceDoc().startsWith('宿主撤销验证'));
+  check(await run(() => app.plugins.plugins['git-workbench'].indexEdits.size === 1), 'native Ctrl+Y redoes comparison edits through host history');
+  await historyKey('Z');
+  await wait(() => !app.plugins.plugins['git-workbench'].indexEdits.size);
+  check(await run(() => { const api = require('@codemirror/view').EditorView, labels = [...document.querySelectorAll('.gp-diff-columns > span')].map(column => column.textContent); return api.findFromDOM(document.querySelector('.cm-merge-a')).state.readOnly && !api.findFromDOM(document.querySelector('.cm-merge-b')).state.readOnly && labels[0] === 'HEAD · 只读' && labels[1] === '暂存区 · 可编辑' && !document.querySelector('.gp-hunk-tools') && !document.querySelector('.cm-merge-revert') && document.querySelector('.gp-save-index').disabled; }), 'comparison shows editable index and selectable read-only original with matching labels and no hunk stage controls');
   const navigation = await run(async () => {
     const get = () => require('@codemirror/view').EditorView.findFromDOM(document.querySelector('.cm-merge-b'));
     document.querySelector('[aria-label="下一处修改"]').click(); await new Promise(r => setTimeout(r, 50)); const first = get().state.selection.main.head;
@@ -55,6 +90,7 @@ module.exports = async ({ window, js, check, capture }) => {
   await run(() => document.querySelector('.gp-save-index').click());
   await wait(() => !app.plugins.plugins['git-workbench'].controller.busy && !app.plugins.plugins['git-workbench'].indexEdits.size);
   check(await run(async () => require('@codemirror/view').EditorView.findFromDOM(document.querySelector('.cm-merge-b')) === window.__qaContinuousEditor && (await app.plugins.plugins['git-workbench'].git.file('笔记库/比较测试.md', { kind: 'index' })).text.includes('连续保存')), 'consecutive saves update the baseline without reopening comparison');
+  check(await run(() => !!document.querySelector('.gp-line-unstage[data-after-line="21"]')), 'consecutive saves refresh line actions for newly changed lines');
   await run(async () => {
     const p = app.plugins.plugins['git-workbench'];
     const legacy = { settings: p.settings, indexDrafts: [['笔记库/比较测试.md', { text: '旧版本未保存片段', base: await p.git.file('笔记库/比较测试.md', { kind: 'index' }) }]] };

@@ -11,7 +11,7 @@ const version = manifest.version;
 if (typeof version !== 'string' || !/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.test(version)) {
   throw new Error('manifest.json version must be a stable X.Y.Z version');
 }
-if (tag !== version && tag !== `v${version}`) throw new Error(`Tag ${tag} does not match manifest version ${version}`);
+if (tag !== version) throw new Error(`Tag ${tag} does not match manifest version ${version}; use the exact version without a v prefix`);
 if (pkg.version !== version || lock.version !== version || lock.packages?.['']?.version !== version) {
   throw new Error('manifest.json, package.json and both package-lock.json versions must match');
 }

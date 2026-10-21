@@ -4,7 +4,7 @@ import type GitWorkbench from '../main';
 import { EMPTY, HEAD, INDEX, WORKTREE, type Commit, type GitRef, type LogFilter, type Revision } from '../types';
 import { layoutGraph, type GraphRow } from '../git/graph';
 import { button, ConfirmModal, date, el, empty, input, message, PromptModal, select, virtualList } from './common';
-import { renderDiff } from './diff';
+import { renderDiff, type DiffRenderer } from './diff';
 import { renderConflict } from './conflict';
 import { GIT_WORKBENCH_ICON } from './icon';
 import { HistoryFilePicker } from './file-picker';
@@ -26,6 +26,9 @@ export class WorkbenchView extends ItemView {
   private cleanups: (() => void)[] = [];
   private token = 0;
   private loadedGeneration = -1;
+  private comparison?: DiffRenderer;
+  private comparisonRefresh?: Promise<void>;
+  private comparisonAgain = false;
   private graphMore = true;
   private graphGeneration = -1;
   private body!: HTMLElement;
@@ -59,11 +62,38 @@ export class WorkbenchView extends ItemView {
     this.containerEl.addClass('gp-container');
     this.unsubscribe = this.plugin.controller.subscribe(() => {
       this.updateStatus();
-      const editingDiff = this.tab === 'diff' && ((this.right.kind === 'index' || this.right.kind === 'worktree') && this.plugin.edits(this.right.kind).has(this.path) || !!this.contentEl.querySelector('.gp-merge-body')?.contains(this.contentEl.ownerDocument.activeElement));
-      if (this.loadedGeneration !== this.plugin.controller.generation && !this.plugin.controller.busy && this.tab !== 'conflict' && !editingDiff) void this.render();
+      this.comparison?.syncStatus();
+      if (this.loadedGeneration !== this.plugin.controller.generation && !this.plugin.controller.busy && this.tab !== 'conflict') {
+        if (this.tab === 'diff' && this.comparison) {
+          if (!this.comparison.isBusy() && !this.hasComparisonEdits()) void this.refreshComparison();
+        } else void this.render();
+      }
     }); await this.render();
   }
-  async onClose(): Promise<void> { this.unsubscribe?.(); this.token++; this.cleanups.forEach(d => d()); this.cleanups = []; }
+  private hasComparisonEdits(): boolean { return this.plugin.indexEdits.has(this.path) || this.plugin.worktreeEdits.has(this.path); }
+  private refreshComparison(): Promise<void> {
+    if (this.comparisonRefresh) { this.comparisonAgain = true; return this.comparisonRefresh; }
+    this.comparisonRefresh = (async () => {
+      do {
+        this.comparisonAgain = false;
+        const comparison = this.comparison, token = this.token, generation = this.plugin.controller.generation;
+        if (this.tab !== 'diff' || !comparison || comparison.isBusy() || this.hasComparisonEdits() || generation === this.loadedGeneration) break;
+        try {
+          const diff = await this.plugin.controller.diff(this.path, this.left, this.right, this.oldPath || this.path);
+          if (token !== this.token || comparison !== this.comparison) break;
+          if (generation !== this.plugin.controller.generation) { this.comparisonAgain = true; continue; }
+          if (comparison.isBusy() || this.hasComparisonEdits()) break;
+          if (!comparison.update(diff)) { await this.render(); break; }
+          this.loadedGeneration = generation;
+        } catch (error) { if (token === this.token && comparison === this.comparison) { this.loadedGeneration = generation; new Notice(`无法更新比较：${message(error)}`); } }
+      } while (this.comparisonAgain);
+    })().finally(() => {
+      this.comparisonRefresh = undefined;
+      if (this.comparisonAgain) { this.comparisonAgain = false; void this.refreshComparison(); }
+    });
+    return this.comparisonRefresh;
+  }
+  async onClose(): Promise<void> { this.unsubscribe?.(); this.token++; this.comparisonAgain = false; this.comparison = undefined; this.cleanups.forEach(d => d()); this.cleanups = []; }
   async show(tab: Tab): Promise<void> { this.tab = tab; await this.render(); }
   async showHistory(path: string): Promise<void> { this.path = path; this.historyLimit = this.plugin.settings.pageSize; await this.show('history'); }
   async showDiff(path: string, left: Revision, right: Revision, oldPath = path): Promise<void> { this.path = path; this.oldPath = oldPath; this.left = left; this.right = right; await this.show('diff'); }
@@ -74,7 +104,7 @@ export class WorkbenchView extends ItemView {
     this.statusLine.classList.toggle('gp-danger', !!c.error);
   }
   async render(): Promise<void> {
-    const token = ++this.token; this.cleanups.forEach(d => d()); this.cleanups = []; this.contentEl.replaceChildren(); this.contentEl.className = 'view-content gp-workbench';
+    const token = ++this.token; this.cleanups.forEach(d => d()); this.cleanups = []; this.comparison = undefined; this.contentEl.replaceChildren(); this.contentEl.className = 'view-content gp-workbench';
     this.loadedGeneration = this.plugin.controller.generation;
     const header = el(this.contentEl, 'header', 'gp-header'); const brand = el(header, 'div', 'gp-brand'); setIcon(el(brand, 'span', 'gp-brand-icon'), GIT_WORKBENCH_ICON); el(brand, 'strong', '', 'Git Workbench');
     const root = this.plugin.git.repo?.root; el(brand, 'span', 'gp-root', root ? root.replace(/\\/g, '/').split('/').at(-1)! : '工作台');
@@ -192,7 +222,15 @@ export class WorkbenchView extends ItemView {
     const parse = (value: string): Revision => value === ':index' ? INDEX : value === ':worktree' ? WORKTREE : value === ':empty' ? EMPTY : { kind: 'commit', ref: value || 'HEAD' };
     button(toolbar, '比较', async () => { this.path = path.value; this.oldPath = this.path; this.left = parse(left.value); this.right = parse(right.value); await this.render(); });
     if (!this.path) { empty(this.body, '选择要比较的文件', '从变化列表、提交详情或文件历史打开差异。'); return; }
-    const pane = el(this.body, 'div', 'gp-diff-pane'); const diff = await this.plugin.controller.diff(this.path, this.left, this.right, this.oldPath || this.path); if (token === this.token) this.cleanups.push(renderDiff(pane, diff, this.plugin));
+    const pane = el(this.body, 'div', 'gp-diff-pane'); const diff = await this.plugin.controller.diff(this.path, this.left, this.right, this.oldPath || this.path);
+    if (token === this.token) {
+      const comparison = renderDiff(pane, diff, this.plugin, generation => {
+        if (comparison !== this.comparison) return;
+        if (generation !== undefined) this.loadedGeneration = generation;
+        if (this.loadedGeneration !== this.plugin.controller.generation) void this.refreshComparison();
+      });
+      this.comparison = comparison; this.cleanups.push(() => comparison.destroy());
+    }
   }
   private async renderRefs(token: number): Promise<void> {
     const toolbar = el(this.body, 'div', 'gp-actions gp-toolbar'); button(toolbar, '新建分支', () => this.plugin.createBranch()); button(toolbar, '新建标签', () => this.plugin.createTag()); button(toolbar, '管理远程', () => this.plugin.manageRemotes());

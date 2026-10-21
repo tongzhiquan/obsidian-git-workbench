@@ -26,6 +26,7 @@ export default class GitWorkbench extends Plugin {
     if (!Platform.isDesktopApp || !(this.app.vault.adapter instanceof FileSystemAdapter)) { new Notice('Git Workbench 需要桌面文件系统笔记库'); return; }
     const data = await this.loadData(); this.settings = { ...DEFAULT_SETTINGS, ...data?.settings };
     if (this.settings.sourceControlLayout !== 'list') this.settings.sourceControlLayout = 'tree';
+    this.settings.allowEditingStagedFiles = this.settings.allowEditingStagedFiles === true;
     // Preserve legacy data without loading or updating the retired draft records.
     // Editing content is now kept only in the current session until explicitly saved.
     if (data && typeof data === 'object' && !Array.isArray(data)) this.storedData = { ...data };
@@ -81,7 +82,7 @@ export default class GitWorkbench extends Plugin {
   persistSettings(): Promise<void> { const data = { ...this.storedData, settings: { ...this.settings } }; this.saveTail = this.saveTail.catch(() => {}).then(() => this.saveData(data)); return this.saveTail; }
   edits(target: EditTarget): Map<string, PendingEdit> { return target === 'index' ? this.indexEdits : this.worktreeEdits; }
   setEdit(path: string, target: EditTarget, edit?: PendingEdit): void { if (edit) this.edits(target).set(path, edit); else this.edits(target).delete(path); }
-  async saveWorkingFile(path: string, text: string, base: FileContent): Promise<void> {
+  async saveWorkingFile(path: string, text: string, base: FileContent, indexBase?: FileContent): Promise<void> {
     const relative = this.git.vaultPath(path), normal = (value: string) => value.replace(/\r\n/g, '\n');
     const checkEditors = () => {
       this.app.workspace.iterateAllLeaves(leaf => {
@@ -98,7 +99,7 @@ export default class GitWorkbench extends Plugin {
         await this.app.vault.process(file, current => { checkEditors(); if (current !== base.text || !base.exists) throw new Error('工作区文件已变化，未保存的编辑内容仍保留在比较器中'); return text; });
       } else if (!base.exists) await this.app.vault.create(relative!, text);
       else throw new Error('工作区文件已删除，未保存的编辑内容仍保留在比较器中');
-    });
+    }, indexBase);
   }
   async openComparisonFile(path: string): Promise<void> {
     const relative = this.git.vaultPath(path);
@@ -127,7 +128,7 @@ export default class GitWorkbench extends Plugin {
   backupMessage(): string { return formatCommitMessage(this.settings.commitTemplate); }
   async openWorkbench(tab?: 'graph' | 'refs' | 'stash'): Promise<WorkbenchView> {
     let leaf = this.app.workspace.getLeavesOfType(WORKBENCH)[0]; if (!leaf) { leaf = this.app.workspace.getLeaf('tab'); await leaf.setViewState({ type: WORKBENCH, active: true }); }
-    await this.app.workspace.revealLeaf(leaf); const view = leaf.view as WorkbenchView; if (tab) await view.show(tab); return view;
+    await this.app.workspace.revealLeaf(leaf); const view = leaf.view as WorkbenchView; if (tab) await view.show(tab); this.app.workspace.setActiveLeaf(leaf, { focus: true }); return view;
   }
   async openSourceControl(active = true): Promise<SourceControlView> {
     if (!this.sourceControlOpening) this.sourceControlOpening = (async () => {
@@ -197,6 +198,10 @@ class GitWorkbenchSettings extends PluginSettingTab {
       ['fullBlame', '整篇逐行归属', '为整篇笔记的每一行显示最后修改者与提交信息，便于追溯不同段落的来源。优先于“当前行修改归属”；关闭后按“当前行修改归属”的设置显示。'],
       ['gutter', '编辑器变化标记', '在行号旁标出相对 Git 暂存区新增、修改和删除的内容。'],
     ] as const) new Setting(parent).setName(name).setDesc(description).addToggle(toggle => toggle.setValue(this.plugin.settings[key]).onChange(async value => { this.plugin.settings[key] = value; await this.plugin.persistSettings(); this.plugin.controller.emit(); }));
+    new Setting(parent).setName('允许编辑已暂存文件').setDesc('默认关闭。开启后，可以在比较器中编辑已暂存文件的工作文件或暂存区内容；历史提交始终只读。').addToggle(toggle => toggle.setValue(this.plugin.settings.allowEditingStagedFiles).onChange(async value => {
+      if (this.plugin.indexEdits.size || this.plugin.worktreeEdits.size) { toggle.setValue(this.plugin.settings.allowEditingStagedFiles); new Notice('请先保存比较器中的文件修改'); return; }
+      this.plugin.settings.allowEditingStagedFiles = value; await this.plugin.persistSettings(); this.plugin.controller.invalidate(); this.plugin.controller.emit();
+    }));
     el(parent, 'h3', '', '自动备份'); el(parent, 'p', 'gp-muted', '自动备份管理整个 Git 仓库，包含当前笔记库外文件。遇到冲突、分叉或认证失败会暂停。所有选项默认关闭。');
     for (const [key, name] of [['autoCommit', '定时暂存并提交全部变化'], ['autoSync', '定时提交并同步'], ['pullOnStartup', '启动时拉取（仅快进）']] as const) new Setting(parent).setName(name).addToggle(toggle => toggle.setValue(this.plugin.settings[key]).onChange(async value => { this.plugin.settings[key] = value; await this.plugin.persistSettings(); this.plugin.configureAutomation(); }));
     new Setting(parent).setName('周期（分钟）').addText(t => t.setValue(String(this.plugin.settings.intervalMinutes)).onChange(async value => { const n = Number(value); if (!Number.isFinite(n) || n < 1 || n > 1440) return; this.plugin.settings.intervalMinutes = n; await this.plugin.persistSettings(); this.plugin.configureAutomation(); }));

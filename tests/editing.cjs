@@ -106,12 +106,15 @@ module.exports = async ({ window, js, check, capture }) => {
     await p.openDiff('笔记库/项目笔记.md', { kind: 'commit', ref: history[0].hash }, { kind: 'commit', ref: history[1].hash });
   });
   await wait(() => !!document.querySelector('.cm-deletedChunk'));
-  const oldText = await run(() => {
+  const oldText = await run(async () => {
     const api = require('@codemirror/view'), view = api.EditorView.findFromDOM(document.querySelector('.gp-merge-body .cm-editor'));
     view.focus(); view.dispatch({ selection: { anchor: 0, head: view.state.doc.length } });
+    // Let CodeMirror finish synchronizing its DOM selection before selecting a deleted widget.
+    await new Promise(resolve => view.requestMeasure({ read: () => null, write: resolve }));
     const old = document.querySelector('.cm-deletedChunk'), range = document.createRange(); range.selectNodeContents(old);
     const selection = document.getSelection(); selection.removeAllRanges(); selection.addRange(range); window.__qaHistoryCopied = null; return selection.toString();
   });
+  console.log('Deleted history copy', await run(() => ({ active: document.activeElement?.className, selected: document.getSelection()?.toString() })), { expected: oldText });
   await key('C'); await wait(() => !!window.__qaHistoryCopied);
   check(await run(() => window.__qaHistoryCopied) === oldText, 'copying deleted historical text uses the selected old content instead of the newer document');
   await run(async () => {

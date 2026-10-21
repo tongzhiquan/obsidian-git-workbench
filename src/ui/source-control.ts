@@ -66,7 +66,6 @@ export class SourceControlView extends ItemView {
       this.renderFiles();
     }));
     menu.addSeparator();
-    menu.addItem(i => i.setTitle('打开 Git Workbench 工作台').setIcon(GIT_WORKBENCH_ICON).onClick(() => this.plugin.openWorkbench()));
     menu.addItem(i => i.setTitle('仓库操作…').setIcon('git-branch').onClick(() => this.plugin.repositoryMenu(anchor)));
     const rect = anchor.getBoundingClientRect(); menu.showAtPosition({ x: rect.right, y: rect.bottom }, anchor.ownerDocument);
   }
@@ -85,6 +84,7 @@ export class SourceControlView extends ItemView {
     const header = el(this.contentEl, 'div', 'gp-sc-header'); el(header, 'strong', '', '源代码管理');
     this.iconButton(header, 'list', '以列表形式查看', () => this.setLayout(this.plugin.settings.sourceControlLayout === 'tree' ? 'list' : 'tree'), 'gp-sc-layout'); this.updateLayoutButton();
     this.iconButton(header, 'refresh-cw', '刷新仓库', () => c.refresh(), 'gp-sc-refresh').disabled = c.busy;
+    this.iconButton(header, GIT_WORKBENCH_ICON, '打开 Git Workbench 工作台', () => this.plugin.openWorkbench(), 'gp-sc-workbench');
     const more = this.iconButton(header, 'ellipsis', '更多源代码管理操作', () => this.showViewMenu(more), 'gp-sc-more');
     if (!this.plugin.git.repo) { empty(this.contentEl, '未连接 Git', c.error || '打开工作台初始化仓库'); button(this.contentEl, '打开工作台', () => this.plugin.openWorkbench()); return; }
     const s = c.status, branch = s?.branch === '(detached)' ? s.head.slice(0, 7) : s?.branch ?? '读取中…';

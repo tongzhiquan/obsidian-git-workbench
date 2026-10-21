@@ -45,7 +45,7 @@ protocol.registerSchemesAsPrivileged([{ scheme: 'app', privileges: { standard: t
 const results = []; const consoleErrors = [];
 const check = (ok, label) => { if (!ok) throw new Error(label); results.push(label); console.log('PASS ' + label); };
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
-const timeout = setTimeout(() => { console.error('Obsidian integration timed out'); app.exit(1); }, 150000);
+const timeout = setTimeout(() => { console.error('Obsidian integration timed out'); app.exit(1); }, 240000);
 let tested = false;
 app.on('browser-window-created', (_event, window) => {
   window.webContents.setBackgroundThrottling(false);
@@ -66,6 +66,13 @@ app.on('browser-window-created', (_event, window) => {
       for (let i=0;i<100;i++) { if (await js("!!document.querySelector('.gp-source-control')")) break; await delay(30); }
       const startup = await js("({source:!!document.querySelector('.gp-source-control'),side:app.workspace.getLeavesOfType('git-workbench-source-control')[0]?.getRoot()===app.workspace.rightSplit,workbench:app.workspace.getLeavesOfType('git-workbench-workbench').length})");
       check(startup.source && startup.side && startup.workbench===0, 'source control opens automatically in right sidebar without opening workbench');
+      if (process.env.GIT_WORKBENCH_QA_DIFF_REFRESH_ONLY === '1') {
+        window.removeAllListeners('show'); window.setSize(1600, 1000); window.show(); window.focus();
+        await require('./diff-refresh.cjs')({ js, check, capture });
+        check(!consoleErrors.some(e => /git-workbench|CodeMirror.*crash|RangeError|TypeError/.test(e)), 'no plugin runtime exceptions');
+        await fsp.writeFile(path.join(root, '.qa', 'diff-refresh-suite-results.json'), JSON.stringify({ qaRoot, results, consoleErrors }, null, 2));
+        clearTimeout(timeout); app.exit(0); return;
+      }
       if (process.env.GIT_WORKBENCH_QA_COMPARISON_ONLY === '1') {
         window.removeAllListeners('show'); window.setSize(1600, 1000); window.show(); window.focus();
         await require('./comparison.cjs')({ window, js, check, capture });
@@ -90,6 +97,8 @@ app.on('browser-window-created', (_event, window) => {
       await js("(()=>{const input=document.querySelector('.gp-history-picker input');input.value='历史设计';input.dispatchEvent(new Event('input',{bubbles:true}))})()"); await delay(100); await capture('git-workbench-file-picker.png');
       await js("document.querySelector('.gp-history-picker .suggestion-item').click()"); for(let i=0;i<100;i++){if(await js("document.querySelector('.gp-history-path')?.textContent==='笔记库/历史设计.md'"))break;await delay(30);}
       check(await js("document.querySelector('.gp-history-path')?.textContent==='笔记库/历史设计.md'&&document.querySelectorAll('.gp-history-row').length>0&&!document.querySelector('.gp-history-picker')"), 'searchable file picker opens selected file history without typing a repository path');
+      await require('./partial-staging.cjs')({ js, check, capture });
+      await require('./diff-refresh.cjs')({ js, check, capture });
       await require('./comparison.cjs')({ window, js, check, capture });
       const manualCommit = await js("(async()=>{const p=app.plugins.plugins['git-workbench'];await app.vault.create('模板提交.md','# template\\n');await p.git.stage(['笔记库/模板提交.md']);await p.controller.refresh();const text=document.querySelector('.gp-commit-input');text.value='vault backup: {{date}}';text.dispatchEvent(new Event('input',{bubbles:true}));const old=(await p.git.status()).head;Array.from(document.querySelectorAll('.gp-commit-controls button')).find(b=>b.textContent==='提交').click();for(let i=0;i<100;i++){await new Promise(r=>setTimeout(r,40));if(!p.controller.busy&&(await p.git.status()).head!==old)break;}return {subject:(await p.git.log({},0,1))[0].subject,files:(await p.git.commitDetail('HEAD')).files.map(f=>f.path)}})()"); check(/^vault backup: \d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(manualCommit.subject)&&manualCommit.files.length===1&&manualCommit.files[0]==='笔记库/模板提交.md', 'manual commit expands date template and commits only staged files');
       const editor = await js("(async()=>{const p=app.plugins.plugins['git-workbench'];const file=app.vault.getAbstractFileByPath('项目笔记.md');await app.workspace.getLeaf('tab').openFile(file);app.workspace.activeLeaf.view.editor.setCursor({line:0,ch:1});for(let i=0;i<100;i++){if(document.querySelector('.gp-inline-blame')?.textContent.includes('Git Workbench QA'))break;await new Promise(r=>setTimeout(r,100));}const view=app.workspace.activeLeaf.view;return {loaded:!!view?.editor,gutter:!!document.querySelector('.gp-change-gutter'),blame:document.querySelector('.gp-inline-blame')?.textContent}})()"); console.log('Editor', editor); check(editor.loaded && editor.gutter && editor.blame?.includes('Git Workbench QA'), 'real CodeMirror editor mounts inline blame and gutter');

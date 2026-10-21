@@ -58,7 +58,11 @@ export class RepositoryController {
     const key = `${path}:${this.status?.head}:${this.git.fingerprint(text)}`; return this.blameCache.get(key) ?? this.blameCache.set(key, await this.git.blame(path, text));
   }
   async diff(path: string, left: Revision, right: Revision, oldPath = path): Promise<FileDiff> {
-    const key = JSON.stringify([path, left, right, oldPath]); return this.diffCache.get(key) ?? this.diffCache.set(key, await this.git.diff(path, left, right, oldPath));
+    const key = JSON.stringify([path, left, right, oldPath]), cached = this.diffCache.get(key);
+    if (cached) return cached;
+    const generation = this.generation, diff = await this.git.diff(path, left, right, oldPath);
+    if (generation === this.generation) this.diffCache.set(key, diff);
+    return diff;
   }
   async lineChange(path: string, blame: BlameLine, contents: string): Promise<BlameChange> {
     const key = JSON.stringify([path, blame.path, blame.hash, blame.originalLine, blame.line, blame.uncommitted ? this.git.fingerprint(contents) : '']);

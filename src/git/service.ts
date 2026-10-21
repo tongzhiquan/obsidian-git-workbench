@@ -5,6 +5,7 @@ import { createTwoFilesPatch } from 'diff';
 import { GitError, GitRunner } from './runner';
 import { LOG_FORMAT, commitFromFields, parseBlame, parseHistory, parseHunks, parseLog, parseStatus, conflictBlocks } from './parsers';
 import { lineChange } from './line-change';
+import { lineEdits, selectedText } from './line-edits';
 import { EMPTY, HEAD, INDEX, WORKTREE, type BlameLine, type BlameChange, type ChangedFile, type Commit, type Conflict, type FileContent, type FileDiff, type GitRef, type LogFilter, type Operation, type Repository, type RepoStatus, type Revision, type Stash } from '../types';
 
 const MAX_TEXT = 2 * 1024 * 1024;
@@ -113,27 +114,29 @@ export class GitService {
     const raw = await this.runner.text(['for-each-ref', '--format=%(refname)%00%(objectname)%00%(HEAD)%00%(upstream:short)', 'refs/heads', 'refs/remotes', 'refs/tags']);
     return raw.trimEnd().split('\n').filter(Boolean).map(line => { const [fullName, hash, head, upstream] = line.split('\0'); const type = fullName.startsWith('refs/heads/') ? 'branch' : fullName.startsWith('refs/remotes/') ? 'remote' : 'tag'; return { fullName, hash, current: head === '*', upstream, type, name: fullName.replace(/^refs\/(heads|remotes|tags)\//, '') }; });
   }
-  async file(path: string, ref: Revision): Promise<FileContent> {
+  async file(path: string, ref: Revision, knownIndex?: FileContent): Promise<FileContent> {
     this.path(path); if (ref.kind === 'empty') return missing();
     if (ref.kind === 'worktree') {
       try { const absolute = this.path(path); const info = await lstat(absolute); if (!info.isFile()) return { ...missing(), exists: true, binary: true }; if (info.size > MAX_TEXT) return content(Buffer.alloc(0), info.size); return content(await readFile(absolute)); }
       catch (e) { if ((e as NodeJS.ErrnoException).code === 'ENOENT') return missing(); throw e; }
     }
-    let object = '', indexEntry: string | undefined;
+    let object = '', indexEntry: string | undefined, mode: string | undefined;
     if (ref.kind === 'index') {
       indexEntry = await this.indexEntry(path);
+      // An unchanged index entry names the same immutable blob, mode and conflict stages.
+      if (knownIndex && indexEntry === knownIndex.indexEntry) return knownIndex;
       const entry = indexEntry.split('\0').find(line => /^\d+ [a-f0-9]+ 0\t/.test(line));
       if (!entry) return { ...missing(), indexEntry };
       if (!/^100(644|755) /.test(entry)) return { ...missing(), exists: true, binary: true, indexEntry };
-      object = entry.split(' ')[1];
+      object = entry.split(' ')[1]; mode = entry.split(' ')[0];
     } else {
       const hash = await this.resolveRef(ref.ref);
       const raw = await this.runner.text(['ls-tree', '-z', hash, '--', path]); if (!raw) return missing();
-      const entry = raw.split('\t')[0].split(' '); if (entry[1] !== 'blob') return { ...missing(), exists: true, binary: true }; object = entry[2];
+      const entry = raw.split('\t')[0].split(' '); if (entry[1] !== 'blob') return { ...missing(), exists: true, binary: true }; object = entry[2]; mode = entry[0];
     }
     const size = Number((await this.runner.text(['cat-file', '-s', object])).trim());
-    if (size > MAX_TEXT) return { ...content(Buffer.alloc(0), size), indexEntry };
-    return { ...content(await this.runner.run(['cat-file', 'blob', object])), indexEntry };
+    if (size > MAX_TEXT) return { ...content(Buffer.alloc(0), size), indexEntry, mode };
+    return { ...content(await this.runner.run(['cat-file', 'blob', object])), indexEntry, mode };
   }
   private async indexEntry(path: string): Promise<string> {
     return (await this.runner.text(['ls-files', '--stage', '-z', '--', path])).split('\0').filter(line => line.slice(line.indexOf('\t') + 1) === path).join('\0');
@@ -162,26 +165,89 @@ export class GitService {
       }
     });
   }
-  async diff(path: string, left: Revision = INDEX, right: Revision = WORKTREE, oldPath = path): Promise<FileDiff> {
+  async diff(path: string, left: Revision = INDEX, right: Revision = WORKTREE, oldPath = path, knownIndex?: FileContent): Promise<FileDiff> {
     this.path(path); this.path(oldPath);
-    const [before, after] = await Promise.all([this.file(oldPath, left), this.file(path, right)]);
+    const [before, after, rawStatus] = await Promise.all([this.file(oldPath, left, knownIndex), this.file(path, right, knownIndex), this.runner.text(['status', '--porcelain=v2', '-z', '--untracked-files=all', '--', path])]);
     let patch = ''; let stageable: FileDiff['stageable'] = null;
+    const status = parseStatus(rawStatus).files.find(file => file.path === path);
+    const hasStagedChanges = !!status && !status.untracked && status.index !== '.';
     if (!before.binary && !after.binary && !before.large && !after.large) {
       if (left.kind === 'index' && right.kind === 'worktree' && oldPath === path && before.exists) { patch = await this.runner.text(['diff', '--no-ext-diff', '--no-textconv', '--no-color', '--', path]); stageable = 'stage'; }
       else if (left.kind === 'commit' && left.ref === 'HEAD' && right.kind === 'index' && oldPath === path) { patch = await this.runner.text(['diff', '--cached', '--no-ext-diff', '--no-textconv', '--no-color', '--', path]); stageable = 'unstage'; }
-      else patch = createTwoFilesPatch(oldPath, path, before.text, after.text, '', '', { context: 3 });
+      else { patch = createTwoFilesPatch(oldPath, path, before.text, after.text, '', '', { context: 3 });
+        if (oldPath === path && left.kind === 'index' && right.kind === 'worktree') stageable = 'stage';
+        if (oldPath === path && left.kind === 'empty' && right.kind === 'index' && !await this.hasHead()) stageable = 'unstage';
+      }
     }
-    return { path, oldPath, left, right, before, after, patch, hunks: parseHunks(patch), stageable };
+    let lineActions = !!stageable && !status?.conflict && !status?.submodule && !status?.oldPath;
+    if ([before, after].some(file => file.mode && !/^100(644|755)$/.test(file.mode))) lineActions = false;
+    const index = left.kind === 'index' ? before : after;
+    if (index.indexEntry && (!/^100(644|755) [a-f0-9]+ 0\t/.test(index.indexEntry) || index.indexEntry.includes('\0'))) lineActions = false;
+    if ([before, after].some(file => /\r\n/.test(file.text) && /(?<!\r)\n/.test(file.text) || /\r(?!\n)/.test(file.text))) lineActions = false;
+    if (lineActions) {
+      const [attrs, raw] = await Promise.all([
+        this.runner.text(['check-attr', '-z', 'filter', 'working-tree-encoding', 'ident', '--', path]),
+        this.runner.text(['diff', ...(stageable === 'unstage' ? ['--cached'] : []), '--raw', '--no-abbrev', '--', path]),
+      ]);
+      const values = attrs.split('\0');
+      for (let i = 2; i < values.length; i += 3) if (!['unspecified', 'unset'].includes(values[i])) lineActions = false;
+      const mode = /^:(\d+) (\d+)/.exec(raw);
+      if (mode && mode[1] !== mode[2] && mode[1] !== '000000' && mode[2] !== '000000') lineActions = false;
+    }
+    return { path, oldPath, left, right, before, after, patch, hunks: parseHunks(patch), stageable, lineActions, hasStagedChanges };
   }
-  async saveWorktree(path: string, text: string, base: FileContent, writer?: () => Promise<void>): Promise<void> {
+  async saveWorktree(path: string, text: string, base: FileContent, writer?: () => Promise<void>, indexBase?: FileContent): Promise<void> {
     this.path(path);
     if (base.binary || base.large || text.includes('\0') || Buffer.byteLength(text) > MAX_TEXT) throw new Error('工作区编辑仅支持 2 MiB 以内的普通 UTF-8 文本');
-    await this.runner.write(async () => {
+    const work = async () => {
+      if (indexBase && await this.indexEntry(path) !== indexBase.indexEntry) throw new Error('暂存区已变化，请刷新差异后重试');
       const absolute = await this.writablePath(path), current = await this.file(path, WORKTREE);
       if (current.exists !== base.exists || current.binary || current.large || current.text !== base.text) throw new Error('工作区文件已被其他操作修改，未覆盖；未保存的编辑仍保留在比较器中');
       if (writer) await writer();
       else { await mkdir(dirname(absolute), { recursive: true }); await writeFile(absolute, text, { flag: base.exists ? 'w' : 'wx' }); }
-    });
+    };
+    await this.runner.write(() => indexBase ? this.withIndexLock(work) : work());
+  }
+  private async withIndexLock<T>(work: (index: string, handle: Awaited<ReturnType<typeof open>>, owner: { installed: boolean }) => Promise<T>): Promise<T> {
+    const index = resolve(this.root(), (await this.runner.text(['rev-parse', '--git-path', 'index'])).trim()), lock = index + '.lock';
+    const handle = await open(lock, 'wx').catch(error => { if (error.code === 'EEXIST') throw new Error('Git index.lock 已存在，请等待其他 Git 操作完成后重试'); throw error; });
+    const owner = { installed: false };
+    try { return await work(index, handle, owner); }
+    finally { await handle.close().catch(() => {}); if (!owner.installed) await unlink(lock).catch(() => {}); }
+  }
+  async applyLines(diff: FileDiff, ids: readonly number[]): Promise<FileDiff> {
+    const model = lineEdits(diff.before.text, diff.after.text);
+    if (!diff.lineActions || !diff.stageable || !model) throw new Error('此文件不能按行暂存');
+    const text = selectedText(model, ids, diff.stageable === 'unstage');
+    if (Buffer.byteLength(text) > MAX_TEXT) throw new Error('暂存内容超过 2 MiB，请使用整文件暂存');
+    return this.runner.write(async () => this.withIndexLock(async (index, handle, owner) => {
+      const current = await this.diff(diff.path, diff.left, diff.right, diff.oldPath, diff.stageable === 'stage' ? diff.before : diff.after);
+      if (!current.lineActions || current.before.text !== diff.before.text || current.before.exists !== diff.before.exists || current.before.mode !== diff.before.mode || current.before.indexEntry !== diff.before.indexEntry || current.after.text !== diff.after.text || current.after.exists !== diff.after.exists || current.after.mode !== diff.after.mode || current.after.indexEntry !== diff.after.indexEntry) throw new Error('文件或暂存区已变化，请刷新差异后重试');
+      const base = diff.stageable === 'stage' ? diff.before : diff.after;
+      const destination = diff.stageable === 'stage' ? diff.after : diff.before;
+      const remove = !destination.exists && ids.length === model.edits.length;
+      const temporary = index + '.git-workbench-' + randomUUID();
+      try {
+        let saved: FileContent = { ...missing(), indexEntry: '' };
+        await copyFile(index, temporary).catch(async error => { if (error.code !== 'ENOENT') throw error; await this.runner.text(['read-tree', '--empty'], { indexFile: temporary }); });
+        if (remove) await this.runner.text(['update-index', '--force-remove', '--', diff.path], { indexFile: temporary });
+        else {
+          const object = (await this.runner.text(['hash-object', '-w', ...(diff.stageable === 'stage' ? ['--path=' + diff.path] : ['--no-filters']), '--stdin'], { input: text })).trim();
+          const mode = base.mode ?? destination.mode ?? '100644';
+          const [, blob] = await Promise.all([
+            this.runner.text(['update-index', '--add', '--cacheinfo', mode, object, diff.path], { indexFile: temporary }),
+            this.runner.run(['cat-file', 'blob', object]),
+          ]);
+          saved = { ...content(blob), mode, indexEntry: `${mode} ${object} 0\t${diff.path}` };
+        }
+        await handle.writeFile(await readFile(temporary)); await handle.sync(); await handle.close();
+        await rename(index + '.lock', index); owner.installed = true;
+        const before = diff.stageable === 'stage' ? saved : current.before, after = diff.stageable === 'unstage' ? saved : current.after;
+        const patch = createTwoFilesPatch(current.oldPath, current.path, before.text, after.text, '', '', { context: 3 });
+        // Keep editing conservative until the caller receives the post-write repository status.
+        return { ...current, before, after, patch, hunks: parseHunks(patch), hasStagedChanges: true };
+      } finally { await unlink(temporary).catch(() => {}); await unlink(temporary + '.lock').catch(() => {}); }
+    }));
   }
   async stage(paths: string[]): Promise<void> { paths.forEach(p => this.path(p)); if (!paths.length) return; await this.runner.write(async () => { await this.pathsCommand(['add', '-A'], paths); }); }
   async unstage(paths: string[]): Promise<void> {

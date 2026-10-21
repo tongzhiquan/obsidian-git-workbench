@@ -11,11 +11,11 @@ export interface Commit { hash: string; parents: string[]; author: string; email
 export interface LogFilter { author?: string; message?: string; since?: string; until?: string; path?: string; ref?: string }
 export interface GitRef { name: string; fullName: string; hash: string; type: 'branch' | 'remote' | 'tag'; current: boolean; upstream: string }
 export interface ChangedFile { path: string; oldPath?: string; status: string }
-export interface FileContent { text: string; size: number; binary: boolean; large: boolean; exists: boolean; indexEntry?: string }
+export interface FileContent { text: string; size: number; binary: boolean; large: boolean; exists: boolean; indexEntry?: string; mode?: string }
 export type EditTarget = 'index' | 'worktree';
 export interface PendingEdit { text: string; base: FileContent }
 export interface DiffHunk { header: string; lines: string[]; patch: string; index: number }
-export interface FileDiff { path: string; oldPath: string; left: Revision; right: Revision; before: FileContent; after: FileContent; patch: string; hunks: DiffHunk[]; stageable: 'stage' | 'unstage' | null }
+export interface FileDiff { path: string; oldPath: string; left: Revision; right: Revision; before: FileContent; after: FileContent; patch: string; hunks: DiffHunk[]; stageable: 'stage' | 'unstage' | null; lineActions?: boolean; hasStagedChanges?: boolean }
 export interface BlameLine { hash: string; author: string; date: number; subject: string; originalLine: number; line: number; path: string; text: string; uncommitted: boolean }
 export interface BlameChangeLine { kind: 'add' | 'delete' | 'context'; text: string; line: number; selected: boolean }
 export interface BlameChange { label: string; lines: BlameChangeLine[]; truncated: boolean; notice?: string }
@@ -27,12 +27,14 @@ export interface Settings {
   diffMode: 'split' | 'unified'; pageSize: number; autoCommit: boolean; autoSync: boolean;
   pullOnStartup: boolean; intervalMinutes: number; commitTemplate: string;
   sourceControlLayout: 'tree' | 'list';
+  allowEditingStagedFiles: boolean;
 }
 export const DEFAULT_SETTINGS: Settings = {
   version: 1, gitPath: 'git', inlineBlame: true, fullBlame: false, gutter: true,
   diffMode: 'split', pageSize: 200, autoCommit: false, autoSync: false,
   pullOnStartup: false, intervalMinutes: 10, commitTemplate: 'vault backup: {{date}}',
   sourceControlLayout: 'tree',
+  allowEditingStagedFiles: false,
 };
 export function revisionLabel(ref: Revision): string {
   return ref.kind === 'commit' ? ref.ref.slice(0, 12) : ({ index: '暂存区', worktree: '工作区', empty: '空版本' })[ref.kind];
