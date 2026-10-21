@@ -150,8 +150,10 @@ button.gp-file-link:hover { color: var(--interactive-accent); background: var(--
 .gp-remote-row code { width: 100%; overflow-wrap: anywhere; font-size: 11px; }
 .gp-sc-header { padding: 4px 8px; min-height: 32px; display: flex; align-items: center; gap: 2px; border-bottom: 1px solid var(--background-modifier-border); flex-shrink: 0; }
 .gp-sc-header strong { flex: 1; font-size: 12px; }
+.gp-sc-header button.gp-icon-button { width: 24px; padding: 3px; flex-shrink: 0; }
 button.gp-icon-button { padding: 2px 6px; height: 24px; background: transparent; box-shadow: none; border: 0; color: var(--text-muted); }
 button.gp-icon-button:hover { background: var(--background-modifier-hover); color: var(--text-normal); }
+button.gp-sc-filter.is-active { color: var(--text-accent); background: var(--background-modifier-hover); }
 .gp-sc-repository { display: flex; align-items: center; gap: 6px; padding: 3px 8px; flex-shrink: 0; }
 .gp-sc-branch { display: flex; align-items: center; gap: 5px; color: var(--text-muted); min-width: 0; flex: 1; font-size: 11px; }
 .gp-sc-branch-name { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }

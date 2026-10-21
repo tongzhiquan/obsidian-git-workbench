@@ -27,6 +27,7 @@ export interface Settings {
   diffMode: 'split' | 'unified'; pageSize: number; autoCommit: boolean; autoSync: boolean;
   pullOnStartup: boolean; intervalMinutes: number; commitTemplate: string;
   sourceControlLayout: 'tree' | 'list';
+  sourceControlVaultOnly: boolean;
   allowEditingStagedFiles: boolean;
 }
 export const DEFAULT_SETTINGS: Settings = {
@@ -34,6 +35,7 @@ export const DEFAULT_SETTINGS: Settings = {
   diffMode: 'split', pageSize: 200, autoCommit: false, autoSync: false,
   pullOnStartup: false, intervalMinutes: 10, commitTemplate: 'vault backup: {{date}}',
   sourceControlLayout: 'tree',
+  sourceControlVaultOnly: false,
   allowEditingStagedFiles: false,
 };
 export function revisionLabel(ref: Revision): string {

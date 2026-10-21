@@ -1,6 +1,27 @@
 # 验证历史
 
-保留截至 2026-10-20 的原始记录。当前验证结果与使用边界见 [VALIDATION.md](../VALIDATION.md)。
+按验证日期记录测试范围、结果和限制；历史记录描述当时状态，不代表后续修改均已覆盖。验证方法与结果索引见 [验证说明](../VALIDATION.md)。
+
+## 2026-10-21 笔记库过滤、文件菜单与最小安装
+
+- 版本 0.3.0，含未发布修改。Windows / Obsidian 1.14.4；构建通过，57 项 Git 集成及单元测试、33 项源代码管理专项通过，运行时错误为 0。
+- 验证漏斗与菜单同步、范围记忆、树形和列表计数、工作台入口及 230px 窄侧栏；批量暂存、取消暂存保留库外内容。真实 Git 仓库覆盖跨范围重命名、路径边界、隐藏文件及仓库根目录笔记库。
+- 8 项文件菜单检查覆盖图标、Obsidian 打开、库内原生定位、库外主进程定位、已删除目录回退和接口缺失时的兼容；定位不改变暂存内容或 HEAD。自动检查拦截系统调用，用户另在 Windows 确认窗口置前效果与内置功能一致。
+- `app.showInFolder` 在 Obsidian 1.14.4 中经主进程 shell 定位文件，但不在公开类型声明中。调用前检测可用性；库外使用宿主 shell，缺失时回退 Electron shell。
+- 隔离测试仅安装三个运行文件。实际安装、重载通过，插件目录仅保留 `main.js`、`manifest.json`、`styles.css` 和原有 `data.json`；旧随附文档和独立许可文件完整归档到项目 `.qa/install-backups`。HEAD、index、暂存项、设置及启用列表校验一致。
+- `@codemirror/merge` 用于并排和统一差异，已打入 `main.js`；宿主模块不提供该包。安装无需 `node_modules`，许可声明保留在脚本头部。
+- 未重跑完整界面回归。文件菜单验证期间曾在悬浮卡片交互和统一差异滚动定位处失败，源代码管理专项未覆盖这些失败项。
+- 结果：`.qa/source-control-results.json`、`.qa/minimal-install-verification.json`、`.qa/dependency-audit.json`；失败上下文：`.qa/obsidian-failure.json`。截图：`git-workbench-source-vault-filter.png`、`git-workbench-source-scope-menu.png`、`git-workbench-source-file-menu.png`。
+- 优化检查另复现日志、文件历史的迟到查询覆盖新缓存，结果见 `.qa/optimization-audit.json`；侧栏整页刷新和重复打开笔记产生新标签列为待处理项。
+
+## 2026-10-21 暂存区编辑权限与完整回归
+
+- 版本 0.3.0，含未发布修复。Windows / Obsidian 1.14.4；构建通过，54 项 Git 集成及单元测试、135 项完整界面检查通过，运行时错误为 0；0.3.0 打包、本地安装与重载通过。
+- 覆盖工作台入口与复用、布局和目录操作、230px 侧栏；并排和统一差异的单行、多行暂存、取消暂存、局部还原及新增、删除文件。
+- 验证暂存区默认只读、设置切换、列状态、原生撤销/重做和连续保存。部分暂存的工作文件可编辑，保存不改变暂存快照或 HEAD；切换暂存区权限保留工作区未保存内容。
+- 验证原地更新保留编辑器、光标、300px 滚动位置、折叠和版本栏；600ms 监听刷新不重建比较页，失败保留差异；迟到的差异查询不污染新代缓存。
+- Git 检查覆盖索引锁、外部变化、权限、CRLF 和末尾换行；界面覆盖历史选择复制、行归属、悬浮差异、分支、Stash、冲突继续/中止、500 提交分页和卸载重载。
+- 实际安装前后 HEAD、启用列表一致；笔记库持续使用期间 index 和设置校验值发生变化，安装未写入或还原这些数据。结果：`.qa/obsidian-results.json`、`.qa/diff-refresh-results.json`、`.qa/permission-scope-install-verification.json`；截图：`git-workbench-incremental-diff.png`、`git-workbench-comparison-*.png`、`git-workbench-sidebar-*.png`。
 
 
 ## 2026-10-20 逐行操作原地更新与刷新优化

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, readFile, writeFile, copyFile, rm } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, writeFile, copyFile, rm, readdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { execFileSync } from 'node:child_process';
@@ -12,6 +12,10 @@ test('installation migrates legacy settings and IDs without overwriting new sett
     await mkdir(join(config, 'plugins', 'git-plus'), { recursive: true });
     await mkdir(join(root, 'scripts'));
     await mkdir(join(root, 'dist'));
+    await mkdir(target, { recursive: true });
+    const obsolete = ['README.md', 'CHANGELOG.md', 'CONTRIBUTING.md', 'LICENSE', 'THIRD-PARTY-LICENSES.txt', 'community-plugins.before-install-123.json', 'workspace.json.before-migration-456.json'];
+    for (const name of obsolete) await writeFile(join(target, name), `old ${name}`);
+    await writeFile(join(target, 'personal-notes.txt'), 'keep user file');
     for (const name of ['install.mjs', 'local-config.cjs']) await copyFile(resolve('scripts', name), join(root, 'scripts', name));
     for (const name of ['main.js', 'styles.css', 'LICENSE', 'THIRD-PARTY-LICENSES.txt']) await writeFile(join(root, 'dist', name), 'fixture');
     await writeFile(join(root, 'dist', 'manifest.json'), JSON.stringify({ id: 'git-workbench', name: 'Git Workbench' }));
@@ -28,6 +32,11 @@ test('installation migrates legacy settings and IDs without overwriting new sett
     assert.equal(result.migratedSettings, true);
     assert.equal(await readFile(join(target, 'data.json'), 'utf8'), legacy);
     assert.equal(await readFile(result.snapshot, 'utf8'), enabled);
+    assert.ok(result.backupDirectory.startsWith(join(root, '.qa', 'install-backups', 'git-workbench')));
+    assert.deepEqual([...result.archivedFiles].sort(), [...obsolete].sort());
+    for (const name of obsolete) assert.equal(await readFile(join(result.backupDirectory, name), 'utf8'), `old ${name}`);
+    assert.deepEqual((await readdir(target)).sort(), ['data.json', 'main.js', 'manifest.json', 'personal-notes.txt', 'styles.css']);
+    assert.equal(await readFile(join(target, 'personal-notes.txt'), 'utf8'), 'keep user file');
     assert.deepEqual(JSON.parse(await readFile(join(config, 'community-plugins.json'), 'utf8')), ['other', 'git-workbench']);
     const hotkeys = JSON.parse(await readFile(join(config, 'hotkeys.json'), 'utf8'));
     assert.deepEqual(hotkeys['git-workbench:commit'], [{ key: 'G' }]);
@@ -41,7 +50,11 @@ test('installation migrates legacy settings and IDs without overwriting new sett
     assert.equal(await readFile(join(config, 'plugins', 'git-plus', 'data.json'), 'utf8'), legacy);
     await writeFile(join(target, 'data.json'), '{"updated":true}');
     const enabledAfter = await readFile(join(config, 'community-plugins.json'), 'utf8');
-    assert.equal(run().migratedSettings, false);
+    const upgraded = run();
+    assert.equal(upgraded.migratedSettings, false);
+    assert.equal(upgraded.backupDirectory, null);
+    assert.equal(upgraded.snapshot, null);
+    assert.deepEqual((await readdir(target)).sort(), ['data.json', 'main.js', 'manifest.json', 'personal-notes.txt', 'styles.css']);
     assert.equal(await readFile(join(target, 'data.json'), 'utf8'), '{"updated":true}');
     assert.equal(await readFile(join(config, 'community-plugins.json'), 'utf8'), enabledAfter);
   } finally { await rm(root, { recursive: true, force: true }); }

@@ -17,17 +17,21 @@
 
 从 [Releases](https://github.com/tongzhiquan/obsidian-git-workbench/releases) 下载 ZIP，将其中的 `git-workbench` 目录放入 `<vault>/.obsidian/plugins/`，在第三方插件中启用。升级时替换插件文件，保留 `data.json`。
 
-从源码构建、本地安装及 CLI 重载见 [开发指南](CONTRIBUTING.md)。安装脚本可从旧版 Git Plus 迁移设置、快捷键和工作区引用，停用旧插件并保留旧文件；后续升级保留 Git Workbench 设置。旧编辑记录和安全副本保留，不自动载入比较器。
+源码构建、本地安装、CLI 重载及 Git Plus 迁移见 [开发指南](CONTRIBUTING.md)。本地安装仅复制三个运行文件，保留已有 `data.json`。
 
 ## 源代码管理
 
-插件加载后自动打开右侧源代码管理。标题栏按钮从左到右为布局、刷新、工作台、更多菜单；点击工作台图标复用已有工作台标签。左侧 Ribbon 和命令面板也可打开工作台。
+插件加载后自动打开右侧源代码管理。标题栏按钮从左到右为布局、刷新、过滤、工作台、更多菜单；工作台图标及更多菜单中的工作台入口复用已有标签。左侧 Ribbon 和命令面板也可打开工作台。
 
 变化按冲突、已暂存、未暂存、未跟踪分组，支持目录树和列表布局。文件、目录或分组旁的 `+` / `−` 可暂存或取消暂存；同一文件出现在已暂存和未暂存两组，表示只有部分修改进入暂存区。
+
+漏斗图标与更多菜单中的“仅显示当前笔记库的变更”同步切换，并记住选择；默认显示整个仓库。过滤后，文件列表、目录及分组计数、批量暂存和取消暂存仅作用于当前笔记库。跨范围移动按库内一侧显示为新增或删除。提交仍包含整个暂存区，远程操作作用于整个仓库。
 
 先暂存所需内容，再输入消息并提交。提交只包含暂存区内容。消息框旁的按钮可填入备份消息；模板中的 `{{date}}` 会替换为本地时间 `YYYY-MM-DD HH:mm:ss`。提交菜单中的 Amend 会替换最近一次提交并改变 SHA，使用时需留意该提交是否已推送。
 
 Fetch、仅快进 Pull 和 Push 位于分支行右侧。悬停分支可查看仓库路径，状态字母悬停可查看含义。笔记库位于仓库子目录时，插件管理上级完整仓库；“库外”表示文件不属于当前笔记库。
+
+文件右键菜单提供“在 Obsidian 中打开”和“在系统资源管理器中显示”。库外文件可通过系统资源管理器定位；已删除文件打开最近仍存在的父目录。
 
 ## 版本比较与编辑
 
@@ -80,5 +84,5 @@ Fetch、仅快进 Pull 和 Push 位于分支行右侧。悬停分支可查看仓
 
 - [更新日志](CHANGELOG.md)：已发布和未发布的用户可见变化。
 - [开发指南](CONTRIBUTING.md)：构建、本地配置、验证和自动发布。
-- [验证记录](https://github.com/tongzhiquan/obsidian-git-workbench/blob/main/VALIDATION.md)：当前结果及未覆盖的环境。
+- [验证说明](https://github.com/tongzhiquan/obsidian-git-workbench/blob/main/VALIDATION.md)：验证方法、按日期记录的结果及未覆盖环境。
 - [交互设计](https://github.com/tongzhiquan/obsidian-git-workbench/blob/main/docs/interaction-design.md)：导航约定和后续方案。

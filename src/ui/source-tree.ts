@@ -7,6 +7,26 @@ export type SourceRow =
   | { kind: 'file'; type: SourceGroup; key: string; file: FileStatus; name: string; directory: string; depth: number };
 const compare = new Intl.Collator('zh-CN', { numeric: true, sensitivity: 'variant' }).compare;
 
+export function scopedSourceFiles(files: FileStatus[], prefix: string, vaultOnly: boolean): FileStatus[] {
+  if (!vaultOnly || !prefix) return files;
+  const inside = (path: string) => path.startsWith(prefix + '/');
+  return files.flatMap(file => {
+    if (inside(file.path)) {
+      if (!file.oldPath || inside(file.oldPath)) return [file];
+      return [{ ...file, oldPath: undefined, index: /[RC]/.test(file.index) ? 'A' : file.index, worktree: /[RC]/.test(file.worktree) ? 'A' : file.worktree }];
+    }
+    if (!file.oldPath || !inside(file.oldPath)) return [];
+    // A move out of the vault is a deletion here; changes at its destination belong outside.
+    const index = file.index === 'R' ? 'D' : '.', worktree = file.index === '.' && file.worktree === 'R' ? 'D' : '.';
+    return index === '.' && worktree === '.' ? [] : [{ ...file, path: file.oldPath, oldPath: undefined, index, worktree }];
+  });
+}
+
+export function sourcePaths(files: FileStatus[], prefix: string, vaultOnly: boolean): string[] {
+  return [...new Set(scopedSourceFiles(files, prefix, vaultOnly).flatMap(file => file.oldPath ? [file.oldPath, file.path] : [file.path]))]
+    .filter(path => !vaultOnly || !prefix || path.startsWith(prefix + '/'));
+}
+
 export function sourceRows(files: FileStatus[], layout: 'tree' | 'list', collapsed: ReadonlySet<string>): SourceRow[] {
   const rows: SourceRow[] = [];
   const groups: [SourceGroup, string, FileStatus[]][] = [

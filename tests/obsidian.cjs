@@ -26,7 +26,7 @@ fs.writeFileSync(path.join(profile, 'obsidian.json'), JSON.stringify({ vaults: {
 fs.copyFileSync(path.join(profile, 'obsidian.json'), path.join(profile, 'gitworkbenchqa.json'));
 fs.writeFileSync(path.join(vault, '.obsidian/app.json'), JSON.stringify({ vimMode: false }));
 fs.writeFileSync(path.join(vault, '.obsidian/community-plugins.json'), '["git-workbench"]');
-for (const name of fs.readdirSync(path.join(root, 'dist'))) fs.copyFileSync(path.join(root, 'dist', name), path.join(pluginDir, name));
+for (const name of ['main.js', 'manifest.json', 'styles.css']) fs.copyFileSync(path.join(root, 'dist', name), path.join(pluginDir, name));
 fs.writeFileSync(path.join(repo, '.gitignore'), '笔记库/.obsidian/\n');
 git('init', '--initial-branch=main'); git('config', 'user.name', 'Git Workbench QA'); git('config', 'user.email', 'qa@example.com'); git('config', 'core.autocrlf', 'false');
 fs.writeFileSync(path.join(vault, '项目笔记.md'), '# Git Workbench\n\n一篇用来验证版本历史的笔记。\n\n## 任务\n\n- 提交图\n- 笔记历史\n- 版本比较\n');
@@ -66,6 +66,14 @@ app.on('browser-window-created', (_event, window) => {
       for (let i=0;i<100;i++) { if (await js("!!document.querySelector('.gp-source-control')")) break; await delay(30); }
       const startup = await js("({source:!!document.querySelector('.gp-source-control'),side:app.workspace.getLeavesOfType('git-workbench-source-control')[0]?.getRoot()===app.workspace.rightSplit,workbench:app.workspace.getLeavesOfType('git-workbench-workbench').length})");
       check(startup.source && startup.side && startup.workbench===0, 'source control opens automatically in right sidebar without opening workbench');
+      if (process.env.GIT_WORKBENCH_QA_SOURCE_CONTROL_ONLY === '1') {
+        window.removeAllListeners('show'); window.setSize(1600, 1000); window.show(); window.focus();
+        await js("(async()=>{const p=app.plugins.plugins['git-workbench'];await p.openWorkbench();await p.openSourceControl()})()");
+        await require('./source-control.cjs')({ window, js, check, capture });
+        check(!consoleErrors.some(e => /git-workbench|CodeMirror.*crash|RangeError|TypeError/.test(e)), 'no plugin runtime exceptions');
+        await fsp.writeFile(path.join(root, '.qa', 'source-control-results.json'), JSON.stringify({ qaRoot, results, consoleErrors }, null, 2));
+        clearTimeout(timeout); app.exit(0); return;
+      }
       if (process.env.GIT_WORKBENCH_QA_DIFF_REFRESH_ONLY === '1') {
         window.removeAllListeners('show'); window.setSize(1600, 1000); window.show(); window.focus();
         await require('./diff-refresh.cjs')({ js, check, capture });

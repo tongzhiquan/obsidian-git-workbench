@@ -9,6 +9,8 @@ import { button, ConfirmModal, el, PromptModal } from './ui/common';
 import { GIT_WORKBENCH_ICON, registerGitWorkbenchIcon } from './ui/icon';
 import { formatCommitMessage } from './commit-message';
 import { shell } from 'electron';
+import { lstat, stat } from 'node:fs/promises';
+import { dirname, resolve } from 'node:path';
 import type { EditTarget, FileContent, PendingEdit } from './types';
 export default class GitWorkbench extends Plugin {
   settings: Settings = { ...DEFAULT_SETTINGS };
@@ -26,6 +28,7 @@ export default class GitWorkbench extends Plugin {
     if (!Platform.isDesktopApp || !(this.app.vault.adapter instanceof FileSystemAdapter)) { new Notice('Git Workbench 需要桌面文件系统笔记库'); return; }
     const data = await this.loadData(); this.settings = { ...DEFAULT_SETTINGS, ...data?.settings };
     if (this.settings.sourceControlLayout !== 'list') this.settings.sourceControlLayout = 'tree';
+    this.settings.sourceControlVaultOnly = this.settings.sourceControlVaultOnly === true;
     this.settings.allowEditingStagedFiles = this.settings.allowEditingStagedFiles === true;
     // Preserve legacy data without loading or updating the retired draft records.
     // Editing content is now kept only in the current session until explicitly saved.
@@ -110,6 +113,31 @@ export default class GitWorkbench extends Plugin {
     } else {
       const error = await shell.openPath(this.git.path(path)); if (error) new Notice(`无法打开文件：${error}`);
     }
+  }
+  async revealFile(path: string): Promise<void> {
+    try {
+      const absolute = this.git.path(path), root = resolve(this.git.root());
+      // Match Obsidian's own file-manager action: its shell bridge runs in the main process.
+      const hostShell = (window as Window & { electron?: { remote?: { shell?: typeof shell } } }).electron?.remote?.shell;
+      const desktopShell = typeof hostShell?.showItemInFolder === 'function' && typeof hostShell.openPath === 'function' ? hostShell : shell;
+      const nativeApp = this.app as typeof this.app & { showInFolder?: (path: string) => void | Promise<void> };
+      try {
+        await lstat(absolute);
+        const relative = this.git.vaultPath(path);
+        if (relative !== undefined && typeof nativeApp.showInFolder === 'function') await nativeApp.showInFolder(relative);
+        else desktopShell.showItemInFolder(absolute);
+        return;
+      }
+      catch (error) { if (!['ENOENT', 'ENOTDIR'].includes((error as NodeJS.ErrnoException).code ?? '')) throw error; }
+      let parent = dirname(absolute);
+      while (true) {
+        try { if ((await stat(parent)).isDirectory()) break; }
+        catch (error) { if (!['ENOENT', 'ENOTDIR'].includes((error as NodeJS.ErrnoException).code ?? '')) throw error; }
+        if (parent === root) throw new Error('仓库目录不存在');
+        parent = dirname(parent);
+      }
+      const error = await desktopShell.openPath(parent); if (error) throw new Error(error);
+    } catch (error) { new Notice(`无法在系统资源管理器中显示：${(error as Error).message}`); }
   }
   configureAutomation(): void {
     if (this.autoTimer) window.clearInterval(this.autoTimer);

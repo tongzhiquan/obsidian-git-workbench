@@ -1,11 +1,11 @@
-import { ItemView, Menu, Notice, setIcon, setTooltip, type WorkspaceLeaf } from 'obsidian';
+import { ItemView, Menu, Notice, setIcon, setTooltip, TFile, type WorkspaceLeaf } from 'obsidian';
 import type GitWorkbench from '../main';
 import { EMPTY, HEAD, INDEX, WORKTREE, type FileStatus } from '../types';
 import { button, ConfirmModal, el, empty, virtualList } from './common';
 import { GIT_WORKBENCH_ICON } from './icon';
 import { formatCommitMessage } from '../commit-message';
 import { statusBadge } from './status';
-import { sourceRows, type SourceRow } from './source-tree';
+import { scopedSourceFiles, sourcePaths, sourceRows, type SourceRow } from './source-tree';
 export const SOURCE_CONTROL = 'git-workbench-source-control';
 export class SourceControlView extends ItemView {
   private unsubscribe?: () => void;
@@ -50,6 +50,20 @@ export class SourceControlView extends ItemView {
     const tree = this.plugin.settings.sourceControlLayout === 'tree';
     setIcon(control, tree ? 'list' : 'list-tree'); setTooltip(control, tree ? '以列表形式查看' : '以树形式查看');
   }
+  private visibleFiles(): FileStatus[] {
+    return scopedSourceFiles(this.plugin.controller.status?.files ?? [], this.plugin.git.repo?.vaultPrefix ?? '', this.plugin.settings.sourceControlVaultOnly);
+  }
+  async setVaultOnly(value: boolean): Promise<void> {
+    this.plugin.settings.sourceControlVaultOnly = value; this.scrollTop = 0;
+    const scroll = this.contentEl.querySelector('.gp-sc-list .gp-virtual'); if (scroll) scroll.scrollTop = 0;
+    this.renderFiles(); this.updateFilterButton(); await this.plugin.persistSettings();
+  }
+  private updateFilterButton(): void {
+    const control = this.contentEl.querySelector<HTMLButtonElement>('.gp-sc-filter'); if (!control) return;
+    const active = this.plugin.settings.sourceControlVaultOnly;
+    control.setAttribute('aria-pressed', String(active)); control.classList.toggle('is-active', active);
+    setTooltip(control, active ? '仅显示当前笔记库的变更（已开启）' : '仅显示当前笔记库的变更');
+  }
   private showCommitMenu(anchor: HTMLElement): void {
     const menu = new Menu(), busy = this.plugin.controller.busy;
     menu.addItem(i => i.setTitle('填入备份消息').setIcon('wand-sparkles').setDisabled(busy).onClick(() => this.fillBackupMessage()));
@@ -60,12 +74,14 @@ export class SourceControlView extends ItemView {
   private showViewMenu(anchor: HTMLElement): void {
     const menu = new Menu();
     for (const [layout, title, icon] of [['list', '以列表形式查看', 'list'], ['tree', '以树形式查看', 'list-tree']] as const) menu.addItem(i => i.setTitle(title).setIcon(icon).setChecked(this.plugin.settings.sourceControlLayout === layout).onClick(() => this.setLayout(layout)));
+    menu.addItem(i => i.setTitle('仅显示当前笔记库的变更').setIcon('filter').setChecked(this.plugin.settings.sourceControlVaultOnly).onClick(() => this.setVaultOnly(!this.plugin.settings.sourceControlVaultOnly)));
     menu.addItem(i => i.setTitle('全部展开').setIcon('unfold-vertical').onClick(() => { this.collapsed.clear(); this.renderFiles(); }));
     menu.addItem(i => i.setTitle('折叠所有文件夹').setIcon('fold-vertical').onClick(() => {
-      for (const row of sourceRows(this.plugin.controller.status?.files ?? [], 'tree', new Set())) if (row.kind === 'folder') this.collapsed.add(row.key);
+      for (const row of sourceRows(this.visibleFiles(), 'tree', new Set())) if (row.kind === 'folder') this.collapsed.add(row.key);
       this.renderFiles();
     }));
     menu.addSeparator();
+    menu.addItem(i => i.setTitle('打开 Git Workbench 工作台').setIcon(GIT_WORKBENCH_ICON).onClick(() => this.plugin.openWorkbench()));
     menu.addItem(i => i.setTitle('仓库操作…').setIcon('git-branch').onClick(() => this.plugin.repositoryMenu(anchor)));
     const rect = anchor.getBoundingClientRect(); menu.showAtPosition({ x: rect.right, y: rect.bottom }, anchor.ownerDocument);
   }
@@ -84,6 +100,7 @@ export class SourceControlView extends ItemView {
     const header = el(this.contentEl, 'div', 'gp-sc-header'); el(header, 'strong', '', '源代码管理');
     this.iconButton(header, 'list', '以列表形式查看', () => this.setLayout(this.plugin.settings.sourceControlLayout === 'tree' ? 'list' : 'tree'), 'gp-sc-layout'); this.updateLayoutButton();
     this.iconButton(header, 'refresh-cw', '刷新仓库', () => c.refresh(), 'gp-sc-refresh').disabled = c.busy;
+    this.iconButton(header, 'filter', '仅显示当前笔记库的变更', () => this.setVaultOnly(!this.plugin.settings.sourceControlVaultOnly), 'gp-sc-filter'); this.updateFilterButton();
     this.iconButton(header, GIT_WORKBENCH_ICON, '打开 Git Workbench 工作台', () => this.plugin.openWorkbench(), 'gp-sc-workbench');
     const more = this.iconButton(header, 'ellipsis', '更多源代码管理操作', () => this.showViewMenu(more), 'gp-sc-more');
     if (!this.plugin.git.repo) { empty(this.contentEl, '未连接 Git', c.error || '打开工作台初始化仓库'); button(this.contentEl, '打开工作台', () => this.plugin.openWorkbench()); return; }
@@ -131,9 +148,10 @@ export class SourceControlView extends ItemView {
     const list = this.contentEl.querySelector<HTMLElement>('.gp-sc-list'); if (!list) return;
     this.scrollTop = list.querySelector('.gp-virtual')?.scrollTop ?? this.scrollTop;
     this.disposeList?.(); list.replaceChildren();
-    const layout = this.plugin.settings.sourceControlLayout, rows = sourceRows(this.plugin.controller.status?.files ?? [], layout, this.collapsed);
+    const layout = this.plugin.settings.sourceControlLayout, rows = sourceRows(this.visibleFiles(), layout, this.collapsed);
     list.dataset.layout = layout;
-    if (!rows.length) { this.disposeList = undefined; empty(list, '工作区干净', '所有变化已提交。'); return; }
+    list.dataset.scope = this.plugin.settings.sourceControlVaultOnly ? 'vault' : 'repository';
+    if (!rows.length) { this.disposeList = undefined; empty(list, this.plugin.settings.sourceControlVaultOnly ? '当前笔记库没有变更' : '工作区干净', this.plugin.settings.sourceControlVaultOnly ? '可关闭过滤查看整个仓库。' : '所有变化已提交。'); return; }
     this.disposeList = virtualList(list, rows, 28, (row, data) => {
       row.style.setProperty('--gp-depth', String(data.depth));
       if (data.kind !== 'file') {
@@ -156,7 +174,7 @@ export class SourceControlView extends ItemView {
   private renderFile(row: HTMLElement, data: Extract<SourceRow, { kind: 'file' }>): void {
     const { file, type } = data, s = this.plugin.controller.status;
     row.classList.add('gp-sc-file'); row.dataset.path = file.path; row.dataset.group = type;
-    const outside = this.plugin.git.vaultPath(file.path) === undefined;
+    const vaultPath = this.plugin.git.vaultPath(file.path), outside = vaultPath === undefined;
     const open = () => type === 'conflict' ? this.plugin.openConflict(file.path) : this.plugin.openDiff(file.path, type === 'index' ? s?.head === '(initial)' ? EMPTY : HEAD : file.untracked ? EMPTY : INDEX, type === 'index' ? INDEX : WORKTREE, type === 'index' && file.oldPath ? file.oldPath : file.path);
     const link = button(row, '', open, 'gp-file-link'); setIcon(el(link, 'span', 'gp-sc-file-icon'), 'file-text'); el(link, 'span', 'gp-sc-filename', data.name);
     if (this.plugin.settings.sourceControlLayout === 'list' && data.directory) el(link, 'span', 'gp-sc-directory', data.directory);
@@ -165,12 +183,14 @@ export class SourceControlView extends ItemView {
     if (type !== 'conflict') this.iconButton(row, type === 'index' ? 'minus' : 'plus', type === 'index' ? '取消暂存' : '暂存', () => this.stage([file], type === 'index'), 'gp-sc-stage').disabled = this.plugin.controller.busy;
     row.oncontextmenu = e => {
       e.preventDefault(); const menu = new Menu(); menu.addItem(i => i.setTitle('查看文件历史').setIcon('history').onClick(() => void this.plugin.openHistory(file.path)));
-      if (!outside) menu.addItem(i => i.setTitle('在 Obsidian 打开').onClick(() => void this.plugin.openNote(file.path)));
+      if (!outside) menu.addItem(i => i.setTitle('在 Obsidian 中打开').setIcon('external-link').setDisabled(!(this.app.vault.getAbstractFileByPath(vaultPath) instanceof TFile)).onClick(() => void this.plugin.openNote(file.path)));
+      menu.addItem(i => i.setTitle('在系统资源管理器中显示').setIcon('folder-open').onClick(() => void this.plugin.revealFile(file.path)));
       if (type === 'worktree' || type === 'untracked') menu.addItem(i => i.setTitle('丢弃工作区修改…').setDisabled(this.plugin.controller.busy).onClick(() => this.plugin.confirmDiscard([file.path]))); menu.showAtMouseEvent(e);
     };
   }
   private stage(files: FileStatus[], unstage: boolean): Promise<unknown> {
-    const paths = [...new Set(files.flatMap(f => f.oldPath ? [f.oldPath, f.path] : [f.path]))];
+    const paths = sourcePaths(files, this.plugin.git.repo?.vaultPrefix ?? '', this.plugin.settings.sourceControlVaultOnly);
+    if (!paths.length) return Promise.resolve();
     if (paths.some(path => this.plugin.indexEdits.has(path) || this.plugin.worktreeEdits.has(path))) { new Notice('请先保存比较器中的文件修改，再调整暂存状态'); return Promise.resolve(); }
     return this.plugin.run(unstage ? '取消暂存' : '暂存', async () => { if (!unstage) await this.plugin.flushEditors(); if (unstage) await this.plugin.git.unstage(paths); else await this.plugin.git.stage(paths); });
   }

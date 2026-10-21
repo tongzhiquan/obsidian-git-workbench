@@ -24,7 +24,8 @@ module.exports = async ({ window, js, check, capture }) => {
   const opened = await run(async () => {
     const header = document.querySelector('.gp-sc-header'), button = header.querySelector('.gp-sc-workbench');
     const more = header.querySelector('.gp-sc-more');
-    const orderCorrect = button.nextElementSibling === more && more === header.lastElementChild, label = button.getAttribute('aria-label');
+    const filter = header.querySelector('.gp-sc-filter');
+    const orderCorrect = header.querySelector('.gp-sc-refresh').nextElementSibling === filter && filter.nextElementSibling === button && button.nextElementSibling === more && more === header.lastElementChild, label = button.getAttribute('aria-label');
     const leaf = app.workspace.getLeavesOfType('git-workbench-workbench')[0];
     button.click(); await new Promise(r => setTimeout(r, 100)); button.click(); await new Promise(r => setTimeout(r, 100));
     const leaves = app.workspace.getLeavesOfType('git-workbench-workbench');
@@ -52,6 +53,7 @@ module.exports = async ({ window, js, check, capture }) => {
     for (let i = 0; i < 80 && !document.querySelector('.gp-source-control'); i++) await new Promise(r => setTimeout(r, 30));
     return app.plugins.plugins['git-workbench'].settings.sourceControlLayout === 'list' && document.querySelector('.gp-sc-list').dataset.layout === 'list';
   }); check(persisted, 'source control layout choice survives plugin reload');
+  await require('./source-file-menu.cjs')({ js, check, capture });
   await run(() => document.querySelector('.gp-sc-layout').click()); await settle();
   const stagedFolder = await run(async () => {
     const p = app.plugins.plugins['git-workbench'];
@@ -70,7 +72,7 @@ module.exports = async ({ window, js, check, capture }) => {
     return invoked;
   }); check(actions.join(',') === 'fetch,pull,push', 'remote icons retain fetch, fast-forward pull and push actions');
   window.focus(); await run(() => { window.focus(); document.querySelector('.gp-sc-more').click(); }); await settle();
-  check(await run(() => [...document.querySelectorAll('.menu-item')].some(n => n.textContent.includes('以列表形式查看')) && [...document.querySelectorAll('.menu-item')].some(n => n.textContent.includes('仓库操作'))), 'overflow menu exposes both layouts, expand/collapse and repository operations');
+  check(await run(() => ['以列表形式查看', '以树形式查看', '仅显示当前笔记库的变更', '打开 Git Workbench 工作台', '仓库操作'].every(title => [...document.querySelectorAll('.menu-item')].some(n => n.textContent.includes(title)))), 'overflow menu exposes layouts, vault scope, workbench and repository operations');
   await run(() => [...document.querySelectorAll('.menu-item')].find(n => n.textContent.includes('以树形式查看')).click()); await settle();
   const groupCollapse = await run(async () => {
     const toggle = () => document.querySelector('[data-collapse-key="group:worktree"]');
@@ -92,4 +94,5 @@ module.exports = async ({ window, js, check, capture }) => {
   }); check(narrow, 'narrow sidebar keeps toolbar icons visible without horizontal overflow');
   await capture('git-workbench-sidebar-narrow.png');
   await run(() => { const side = app.workspace.rightSplit.containerEl; if (window.__qaSideStyle === null) side.removeAttribute('style'); else side.setAttribute('style', window.__qaSideStyle); });
+  await require('./source-scope.cjs')({ js, check, capture });
 };
