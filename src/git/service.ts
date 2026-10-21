@@ -170,7 +170,6 @@ export class GitService {
     const [before, after, rawStatus] = await Promise.all([this.file(oldPath, left, knownIndex), this.file(path, right, knownIndex), this.runner.text(['status', '--porcelain=v2', '-z', '--untracked-files=all', '--', path])]);
     let patch = ''; let stageable: FileDiff['stageable'] = null;
     const status = parseStatus(rawStatus).files.find(file => file.path === path);
-    const hasStagedChanges = !!status && !status.untracked && status.index !== '.';
     if (!before.binary && !after.binary && !before.large && !after.large) {
       if (left.kind === 'index' && right.kind === 'worktree' && oldPath === path && before.exists) { patch = await this.runner.text(['diff', '--no-ext-diff', '--no-textconv', '--no-color', '--', path]); stageable = 'stage'; }
       else if (left.kind === 'commit' && left.ref === 'HEAD' && right.kind === 'index' && oldPath === path) { patch = await this.runner.text(['diff', '--cached', '--no-ext-diff', '--no-textconv', '--no-color', '--', path]); stageable = 'unstage'; }
@@ -194,7 +193,7 @@ export class GitService {
       const mode = /^:(\d+) (\d+)/.exec(raw);
       if (mode && mode[1] !== mode[2] && mode[1] !== '000000' && mode[2] !== '000000') lineActions = false;
     }
-    return { path, oldPath, left, right, before, after, patch, hunks: parseHunks(patch), stageable, lineActions, hasStagedChanges };
+    return { path, oldPath, left, right, before, after, patch, hunks: parseHunks(patch), stageable, lineActions };
   }
   async saveWorktree(path: string, text: string, base: FileContent, writer?: () => Promise<void>, indexBase?: FileContent): Promise<void> {
     this.path(path);
@@ -244,8 +243,7 @@ export class GitService {
         await rename(index + '.lock', index); owner.installed = true;
         const before = diff.stageable === 'stage' ? saved : current.before, after = diff.stageable === 'unstage' ? saved : current.after;
         const patch = createTwoFilesPatch(current.oldPath, current.path, before.text, after.text, '', '', { context: 3 });
-        // Keep editing conservative until the caller receives the post-write repository status.
-        return { ...current, before, after, patch, hunks: parseHunks(patch), hasStagedChanges: true };
+        return { ...current, before, after, patch, hunks: parseHunks(patch) };
       } finally { await unlink(temporary).catch(() => {}); await unlink(temporary + '.lock').catch(() => {}); }
     }));
   }

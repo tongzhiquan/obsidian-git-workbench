@@ -51,7 +51,7 @@ export function renderDiff(parent: HTMLElement, diff: FileDiff, plugin: GitWorkb
   let base = pending?.base ?? diff.after;
   const mixedEol = () => /\r\n/.test(base.text) && /(?<!\r)\n/.test(base.text) || /\r(?!\n)/.test(base.text);
   const canEdit = () => !!target && !base.binary && !base.large && !mixedEol() && (target === 'worktree' || base.exists && /^100(644|755) [a-f0-9]+ 0\t/.test(base.indexEntry ?? '') && !base.indexEntry!.includes('\0'))
-    && (plugin.settings.allowEditingStagedFiles || target !== 'index' && !diff.hasStagedChanges && !plugin.controller.status?.files.some(file => file.path === diff.path && !file.untracked && file.index !== '.'));
+    && (target === 'worktree' || plugin.settings.allowEditingStagedFiles);
   let editable = canEdit(), saving = false, lineBusy = false, syncing = false, disposed = false, merge: MergeView | undefined, right: EditorView | undefined;
   let current = -1, rightColumn: HTMLElement | undefined;
   const unified = new Compartment(), editability = new Compartment(), editing = new Compartment();
@@ -97,7 +97,6 @@ export function renderDiff(parent: HTMLElement, diff: FileDiff, plugin: GitWorkb
       } finally {
         lineBusy = false;
         if (!disposed) {
-          if (applied && !plugin.controller.error && plugin.controller.status) diff.hasStagedChanges = plugin.controller.status.files.some(file => file.path === diff.path && !file.untracked && file.index !== '.');
           updateStatus(); onUpdated(applied && !plugin.controller.error ? generation + 1 : undefined);
         }
       }

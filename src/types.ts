@@ -15,7 +15,7 @@ export interface FileContent { text: string; size: number; binary: boolean; larg
 export type EditTarget = 'index' | 'worktree';
 export interface PendingEdit { text: string; base: FileContent }
 export interface DiffHunk { header: string; lines: string[]; patch: string; index: number }
-export interface FileDiff { path: string; oldPath: string; left: Revision; right: Revision; before: FileContent; after: FileContent; patch: string; hunks: DiffHunk[]; stageable: 'stage' | 'unstage' | null; lineActions?: boolean; hasStagedChanges?: boolean }
+export interface FileDiff { path: string; oldPath: string; left: Revision; right: Revision; before: FileContent; after: FileContent; patch: string; hunks: DiffHunk[]; stageable: 'stage' | 'unstage' | null; lineActions?: boolean }
 export interface BlameLine { hash: string; author: string; date: number; subject: string; originalLine: number; line: number; path: string; text: string; uncommitted: boolean }
 export interface BlameChangeLine { kind: 'add' | 'delete' | 'context'; text: string; line: number; selected: boolean }
 export interface BlameChange { label: string; lines: BlameChangeLine[]; truncated: boolean; notice?: string }

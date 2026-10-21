@@ -21,8 +21,8 @@ module.exports = async ({ window, js, check, capture }) => {
   }), 'staged comparison defaults to read-only and column labels match its actual permissions');
   // Exercise the registered settings tab directly: Obsidian may host Settings in another window.
   await run(() => { const tab = app.setting.pluginTabs.find(tab => tab.id === 'git-workbench'); tab.display(); window.__qaSettingsTab = tab; });
-  await wait(() => [...window.__qaSettingsTab.containerEl.querySelectorAll('.setting-item')].some(row => row.querySelector('.setting-item-name')?.textContent === '允许编辑已暂存文件'));
-  await run(() => [...window.__qaSettingsTab.containerEl.querySelectorAll('.setting-item')].find(row => row.querySelector('.setting-item-name')?.textContent === '允许编辑已暂存文件').querySelector('.checkbox-container').dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })));
+  await wait(() => [...window.__qaSettingsTab.containerEl.querySelectorAll('.setting-item')].some(row => row.querySelector('.setting-item-name')?.textContent === '允许编辑暂存区'));
+  await run(() => [...window.__qaSettingsTab.containerEl.querySelectorAll('.setting-item')].find(row => row.querySelector('.setting-item-name')?.textContent === '允许编辑暂存区').querySelector('.checkbox-container').dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })));
   await wait(() => app.plugins.plugins['git-workbench'].settings.allowEditingStagedFiles);
   await wait(async () => (await app.plugins.plugins['git-workbench'].loadData()).settings.allowEditingStagedFiles);
   await run(async () => { const p = app.plugins.plugins['git-workbench']; await p.controller.refresh(); await p.openDiff('笔记库/比较测试.md', { kind: 'commit', ref: 'HEAD' }, { kind: 'index' }); });

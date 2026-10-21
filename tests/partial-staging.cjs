@@ -1,6 +1,6 @@
 // All writes are limited to the disposable Obsidian QA repository.
 module.exports = async ({ js, check, capture }) => {
-  const run = fn => js(`(${fn.toString()})()`);
+  const run = (fn, ...args) => js(`(${fn.toString()})(...${JSON.stringify(args)})`);
   const wait = async fn => { for (let i = 0; i < 120; i++) { if (await run(fn)) return; await new Promise(r => setTimeout(r, 50)); } throw new Error('Partial staging UI did not settle'); };
   await run(async () => {
     const p = app.plugins.plugins['git-workbench'];
@@ -22,11 +22,11 @@ module.exports = async ({ js, check, capture }) => {
   });
   await wait(() => document.querySelector('.gp-line-selection')?.textContent.includes('已选 2'));
   await run(() => [...document.querySelectorAll('.gp-line-selection button')].find(b => b.textContent === '暂存所选修改').click());
-  await wait(() => !app.plugins.plugins['git-workbench'].controller.busy && !!document.querySelector('.cm-merge-b') && !document.querySelector('.gp-save-worktree'));
+  await wait(() => !app.plugins.plugins['git-workbench'].controller.busy && !!document.querySelector('.cm-merge-b') && !!document.querySelector('.gp-save-worktree'));
   check(await run(async () => {
     const p = app.plugins.plugins['git-workbench'];
-    return (await p.git.file('笔记库/逐行测试.md', { kind: 'index' })).text === '# lines\nA\nB\nmiddle\nremove one\nremove two\nend\n' && (await p.git.file('笔记库/逐行测试.md', { kind: 'worktree' })).text === '# lines\nA\nB\nextra\nmiddle\nend\n' && require('@codemirror/view').EditorView.findFromDOM(document.querySelector('.cm-merge-b')).state.readOnly && document.querySelector('.gp-diff-columns > span:last-child').textContent === '工作区 · 只读';
-  }), 'multi-line selection stages only selected replacements and partially staged working files become noneditable by default');
+    return (await p.git.file('笔记库/逐行测试.md', { kind: 'index' })).text === '# lines\nA\nB\nmiddle\nremove one\nremove two\nend\n' && (await p.git.file('笔记库/逐行测试.md', { kind: 'worktree' })).text === '# lines\nA\nB\nextra\nmiddle\nend\n' && !require('@codemirror/view').EditorView.findFromDOM(document.querySelector('.cm-merge-b')).state.readOnly && document.querySelector('.gp-diff-columns > span:last-child').textContent === '工作区 · 可编辑';
+  }), 'multi-line selection stages only selected replacements and keeps partially staged working files editable by default');
   await wait(() => !!document.querySelector('.gp-line-stage[data-before-line="5"]'));
   await run(() => document.querySelector('.gp-line-stage[data-before-line="5"]').click());
   await wait(() => !app.plugins.plugins['git-workbench'].controller.busy && !!document.querySelector('.gp-line-restore[data-after-line="4"]'));
@@ -59,5 +59,56 @@ module.exports = async ({ js, check, capture }) => {
   await run(() => document.querySelector('.gp-line-stage[data-after-line="2"]').click());
   await wait(() => !app.plugins.plugins['git-workbench'].controller.busy && document.querySelectorAll('.gp-line-stage').length === 2);
   check(await run(async () => (await app.plugins.plugins['git-workbench'].git.file('笔记库/逐行新增.md', { kind: 'index' })).text === 'second\n'), 'unified untracked files support staging one line without staging the rest');
+  await run(async () => {
+    const p = app.plugins.plugins['git-workbench'];
+    window.__qaPermissionBase = { index: (await p.git.file('笔记库/逐行测试.md', { kind: 'index' })).indexEntry, head: (await p.git.status()).head };
+  });
+  for (const mode of ['split', 'unified']) {
+    await run(async mode => {
+      const p = app.plugins.plugins['git-workbench']; p.settings.diffMode = mode; p.settings.allowEditingStagedFiles = false;
+      await p.persistSettings(); await p.controller.refresh(); await p.openDiff('笔记库/逐行测试.md', { kind: 'index' }, { kind: 'worktree' });
+    }, mode);
+    await wait(() => !!document.querySelector('.gp-save-worktree') && !!document.querySelector('.cm-merge-b, .gp-merge-body > .cm-editor'));
+    check(await run(mode => {
+      const api = require('@codemirror/view').EditorView, view = api.findFromDOM(document.querySelector('.cm-merge-b, .gp-merge-body > .cm-editor'));
+      return !view.state.readOnly && !!document.querySelector('.gp-save-worktree') && (mode !== 'split' || api.findFromDOM(document.querySelector('.cm-merge-a')).state.readOnly && document.querySelector('.gp-diff-columns > span:last-child').textContent === '工作区 · 可编辑');
+    }, mode), `${mode} partially staged worktree remains editable while its index baseline stays read-only`);
+    await run(mode => {
+      const view = require('@codemirror/view').EditorView.findFromDOM(document.querySelector('.cm-merge-b, .gp-merge-body > .cm-editor'));
+      view.dispatch({ changes: { from: 0, to: view.state.doc.line(1).to, insert: `# lines: ${mode} worktree edit` } });
+      window.__qaPermissionExpected = view.state.sliceDoc();
+    }, mode);
+    await wait(() => !!app.plugins.plugins['git-workbench'].worktreeEdits.size);
+    for (const enabled of [true, false]) {
+      await run(() => {
+        const tab = app.setting.pluginTabs.find(tab => tab.id === 'git-workbench'); tab.display();
+        [...tab.containerEl.querySelectorAll('.setting-item')].find(row => row.querySelector('.setting-item-name')?.textContent === '允许编辑暂存区').querySelector('.checkbox-container').dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+      });
+      await wait(async () => {
+        const p = app.plugins.plugins['git-workbench']; return p.settings.allowEditingStagedFiles === (await p.loadData()).settings.allowEditingStagedFiles;
+      });
+      check(await run(enabled => {
+        const p = app.plugins.plugins['git-workbench'], view = require('@codemirror/view').EditorView.findFromDOM(document.querySelector('.cm-merge-b, .gp-merge-body > .cm-editor'));
+        return p.settings.allowEditingStagedFiles === enabled && !view.state.readOnly && view.state.sliceDoc() === window.__qaPermissionExpected && p.worktreeEdits.has('笔记库/逐行测试.md');
+      }, enabled), `${mode} changing index editing to ${enabled} preserves pending worktree edits and permission`);
+    }
+    await run(() => document.querySelector('.gp-save-worktree').click());
+    await wait(() => !app.plugins.plugins['git-workbench'].controller.busy && !app.plugins.plugins['git-workbench'].worktreeEdits.size);
+    check(await run(async () => {
+      const p = app.plugins.plugins['git-workbench'];
+      return (await p.git.file('笔记库/逐行测试.md', { kind: 'worktree' })).text === window.__qaPermissionExpected && (await p.git.file('笔记库/逐行测试.md', { kind: 'index' })).indexEntry === window.__qaPermissionBase.index && (await p.git.status()).head === window.__qaPermissionBase.head;
+    }), `${mode} partially staged worktree saves the edited text without changing index or HEAD`);
+    await capture(`git-workbench-partial-permissions-${mode}.png`);
+    await run(async () => app.plugins.plugins['git-workbench'].openDiff('笔记库/逐行测试.md', { kind: 'commit', ref: 'HEAD' }, { kind: 'index' }));
+    await wait(() => {
+      const node = document.querySelector('.cm-merge-b, .gp-merge-body > .cm-editor');
+      return !!node && require('@codemirror/view').EditorView.findFromDOM(node).state.readOnly && !document.querySelector('.gp-save-worktree');
+    });
+    check(await run(() => {
+      const view = require('@codemirror/view').EditorView.findFromDOM(document.querySelector('.cm-merge-b, .gp-merge-body > .cm-editor')), before = view.state.sliceDoc();
+      view.dispatch({ changes: { from: 0, insert: 'must not enter index' } });
+      return view.state.readOnly && !document.querySelector('.gp-save-index') && view.state.sliceDoc() === before;
+    }), `${mode} index remains read-only and rejects typing while index editing is disabled`);
+  }
   await run(async () => { const p = app.plugins.plugins['git-workbench']; await p.git.unstage(['笔记库/逐行测试.md', '笔记库/逐行新增.md']); await p.openWorkbench('graph'); });
 };

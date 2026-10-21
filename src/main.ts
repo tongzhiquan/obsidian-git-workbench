@@ -198,8 +198,8 @@ class GitWorkbenchSettings extends PluginSettingTab {
       ['fullBlame', '整篇逐行归属', '为整篇笔记的每一行显示最后修改者与提交信息，便于追溯不同段落的来源。优先于“当前行修改归属”；关闭后按“当前行修改归属”的设置显示。'],
       ['gutter', '编辑器变化标记', '在行号旁标出相对 Git 暂存区新增、修改和删除的内容。'],
     ] as const) new Setting(parent).setName(name).setDesc(description).addToggle(toggle => toggle.setValue(this.plugin.settings[key]).onChange(async value => { this.plugin.settings[key] = value; await this.plugin.persistSettings(); this.plugin.controller.emit(); }));
-    new Setting(parent).setName('允许编辑已暂存文件').setDesc('默认关闭。开启后，可以在比较器中编辑已暂存文件的工作文件或暂存区内容；历史提交始终只读。').addToggle(toggle => toggle.setValue(this.plugin.settings.allowEditingStagedFiles).onChange(async value => {
-      if (this.plugin.indexEdits.size || this.plugin.worktreeEdits.size) { toggle.setValue(this.plugin.settings.allowEditingStagedFiles); new Notice('请先保存比较器中的文件修改'); return; }
+    new Setting(parent).setName('允许编辑暂存区').setDesc('默认关闭。开启后可直接编辑比较器中的暂存快照。工作区可编辑，历史提交始终只读。').addToggle(toggle => toggle.setValue(this.plugin.settings.allowEditingStagedFiles).onChange(async value => {
+      if (this.plugin.indexEdits.size) { toggle.setValue(this.plugin.settings.allowEditingStagedFiles); new Notice('请先保存暂存区中的修改'); return; }
       this.plugin.settings.allowEditingStagedFiles = value; await this.plugin.persistSettings(); this.plugin.controller.invalidate(); this.plugin.controller.emit();
     }));
     el(parent, 'h3', '', '自动备份'); el(parent, 'p', 'gp-muted', '自动备份管理整个 Git 仓库，包含当前笔记库外文件。遇到冲突、分叉或认证失败会暂停。所有选项默认关闭。');
