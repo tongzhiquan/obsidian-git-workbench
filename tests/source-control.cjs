@@ -15,6 +15,7 @@ module.exports = async ({ window, js, check, capture }) => {
     await app.vault.modify(app.vault.getAbstractFileByPath('目录测试/子目录/第一篇.md'), 'another working edit\n');
     await p.controller.refresh();
   }); await settle();
+  await require('./source-refresh.cjs')({ js, check });
   check(await run(() => document.querySelector('.gp-sc-list').dataset.layout === 'tree' && !!document.querySelector('.gp-sc-folder')), 'source control defaults to a hierarchical directory tree');
   const compact = await run(() => {
     const side = document.querySelector('.gp-source-control').getBoundingClientRect(), list = document.querySelector('.gp-sc-list').getBoundingClientRect();

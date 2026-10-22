@@ -33,8 +33,32 @@ module.exports = async ({ js, check, capture }) => {
     }), 'file context menu shows Obsidian open and Explorer reveal with their icons');
     await capture('git-workbench-source-file-menu.png');
     await run(() => [...document.querySelectorAll('.menu-item')].find(n => n.textContent.includes('在 Obsidian 中打开')).click());
-    await wait(() => app.workspace.getLeavesOfType('markdown').some(l => l.view.file?.path === '目录测试/子目录/第一篇.md'));
+    await wait(() => app.workspace.getLeavesOfType('markdown').some(l => l.view.file?.path === '目录测试/子目录/第一篇.md' && l.view.editor?.getValue().length >= 6));
     check(true, 'file menu opens a vault file in an Obsidian editor');
+    check(await run(async () => {
+      const p = app.plugins.plugins['git-workbench'], path = '笔记库/目录测试/子目录/第一篇.md';
+      const leaf = app.workspace.getLeavesOfType('markdown').find(l => l.view.file?.path === '目录测试/子目录/第一篇.md');
+      leaf.view.editor.setSelection({ line: 0, ch: 2 }, { line: 0, ch: 6 });
+      const selection = JSON.stringify(leaf.view.editor.listSelections());
+      await p.openWorkbench(); await p.openNote(path);
+      const fromMenu = app.workspace.activeLeaf === leaf;
+      await p.openWorkbench(); await p.openComparisonFile(path);
+      return fromMenu && app.workspace.activeLeaf === leaf && app.workspace.getLeavesOfType('markdown').filter(l => l.view.file?.path === '目录测试/子目录/第一篇.md').length === 1 && JSON.stringify(leaf.view.editor.listSelections()) === selection;
+    }), 'sidebar and comparison open actions reuse and activate the existing note without resetting its selection');
+    check(await run(async () => {
+      const p = app.plugins.plugins['git-workbench'], path = '笔记库/目录测试/子目录/第二篇.md';
+      await Promise.all([p.openNote(path), p.openComparisonFile(path), p.openNote(path)]);
+      const leaves = app.workspace.getLeavesOfType('markdown').filter(l => l.view.file?.path === '目录测试/子目录/第二篇.md');
+      const ok = leaves.length === 1 && app.workspace.activeLeaf === leaves[0]; leaves.forEach(l => l.detach()); return ok;
+    }), 'concurrent sidebar and comparison requests create only one note tab');
+    check(await run(async () => {
+      const p = app.plugins.plugins['git-workbench'], file = await app.vault.create('打开复用.canvas', '{"nodes":[],"edges":[]}');
+      try {
+        await p.openNote(p.git.repoPath(file.path)); const leaf = app.workspace.activeLeaf;
+        await p.openWorkbench(); await p.openComparisonFile(p.git.repoPath(file.path));
+        return leaf.view.getViewType() === 'canvas' && app.workspace.activeLeaf === leaf && app.workspace.getLeavesOfType('canvas').filter(l => l.view.file?.path === file.path).length === 1;
+      } finally { for (const leaf of app.workspace.getLeavesOfType('canvas')) if (leaf.view.file?.path === file.path) leaf.detach(); await app.vault.delete(file); }
+    }), 'file-tab reuse also supports native non-Markdown file views');
     await reveal('笔记库/目录测试/子目录/第一篇.md');
     await wait(() => window.__qaSourceMenu.calls.length === 1);
     check(await run(() => {
@@ -51,7 +75,7 @@ module.exports = async ({ js, check, capture }) => {
       const p = app.plugins.plugins['git-workbench'], fs = require('node:fs/promises'), path = require('node:path');
       const file = '系统定位/已删除/空 格#%.txt';
       await fs.mkdir(path.dirname(p.git.path(file)), { recursive: true }); await fs.writeFile(p.git.path(file), 'deleted fixture\n');
-      await p.git.stage([file]); await fs.unlink(p.git.path(file)); await fs.rmdir(path.dirname(p.git.path(file)));
+      await p.git.stage([file]); window.__qaSourceMenu.deletedStaged = true; await fs.unlink(p.git.path(file)); await fs.rmdir(path.dirname(p.git.path(file)));
       window.__qaSourceMenu.index = await p.git.runner.text(['ls-files', '--stage', '-z']); window.__qaSourceMenu.head = (await p.git.status()).head;
       await p.controller.refresh();
     });
@@ -75,7 +99,7 @@ module.exports = async ({ js, check, capture }) => {
     await run(async () => {
       const q = window.__qaSourceMenu; q.shell.showItemInFolder = q.show; q.shell.openPath = q.open; window.electron = q.originalBridge;
       if (q.nativeDescriptor) Object.defineProperty(app, 'showInFolder', q.nativeDescriptor); else delete app.showInFolder;
-      const p = app.plugins.plugins['git-workbench']; await p.git.unstage(['系统定位/已删除/空 格#%.txt']); await p.controller.refresh();
+      const p = app.plugins.plugins['git-workbench']; if (q.deletedStaged) await p.git.unstage(['系统定位/已删除/空 格#%.txt']); await p.controller.refresh();
       for (const leaf of app.workspace.getLeavesOfType('markdown')) if (leaf.view.file?.path === '目录测试/子目录/第一篇.md') leaf.detach();
       await p.openWorkbench('graph');
     });

@@ -1,4 +1,4 @@
-import { FileSystemAdapter, MarkdownView, Menu, Modal, Notice, Platform, Plugin, PluginSettingTab, Setting, TFile } from 'obsidian';
+import { FileSystemAdapter, FileView, MarkdownView, Menu, Modal, Notice, Platform, Plugin, PluginSettingTab, Setting, TFile, type WorkspaceLeaf } from 'obsidian';
 import { GitService } from './git/service';
 import { RepositoryController } from './controller';
 import { editorExtensions } from './editor';
@@ -23,6 +23,7 @@ export default class GitWorkbench extends Plugin {
   private autoTimer?: number;
   private saveTail: Promise<void> = Promise.resolve();
   private sourceControlOpening?: Promise<SourceControlView>;
+  private fileOpenings = new Map<string, Promise<void>>();
   private unloaded = false;
   async onload(): Promise<void> {
     if (!Platform.isDesktopApp || !(this.app.vault.adapter instanceof FileSystemAdapter)) { new Notice('Git Workbench 需要桌面文件系统笔记库'); return; }
@@ -109,7 +110,7 @@ export default class GitWorkbench extends Plugin {
     if (relative !== undefined) {
       const file = this.app.vault.getAbstractFileByPath(relative);
       if (!(file instanceof TFile)) { new Notice('工作区文件不存在，可能已删除或重命名'); return; }
-      await this.app.workspace.getLeaf('tab').openFile(file);
+      await this.openVaultFile(file);
     } else {
       const error = await shell.openPath(this.git.path(path)); if (error) new Notice(`无法打开文件：${error}`);
     }
@@ -173,7 +174,21 @@ export default class GitWorkbench extends Plugin {
   async openDiff(path: string, left: Revision = INDEX, right: Revision = WORKTREE, oldPath = path): Promise<void> { await this.flushEditors(); this.controller.invalidate(); await (await this.openWorkbench()).showDiff(path, left, right, oldPath); }
   async openConflict(path: string): Promise<void> { await (await this.openWorkbench()).showConflict(path); }
   async openCommit(hash: string): Promise<void> { const view = await this.openWorkbench(); view.selectedHash = hash; view.filter = { ref: hash }; view.commits = []; await view.show('graph'); }
-  async openNote(path: string): Promise<void> { const relative = this.git.vaultPath(path); if (relative === undefined) return; const file = this.app.vault.getAbstractFileByPath(relative); if (file instanceof TFile) await this.app.workspace.getLeaf('tab').openFile(file); }
+  private openVaultFile(file: TFile): Promise<void> {
+    const path = file.path, pending = this.fileOpenings.get(path); if (pending) return pending;
+    const opening = (async () => {
+      const workspace = this.app.workspace, matches: WorkspaceLeaf[] = [];
+      workspace.iterateAllLeaves(leaf => {
+        if (leaf.view instanceof FileView ? leaf.view.file?.path === path : leaf.isDeferred && leaf.getViewState().state?.file === path) matches.push(leaf);
+      });
+      const existing = matches.find(leaf => leaf === workspace.activeLeaf) ?? matches[0];
+      if (existing) {
+        await existing.loadIfDeferred(); await workspace.revealLeaf(existing); workspace.setActiveLeaf(existing, { focus: true });
+      } else await workspace.getLeaf('tab').openFile(file);
+    })().finally(() => { this.fileOpenings.delete(path); });
+    this.fileOpenings.set(path, opening); return opening;
+  }
+  async openNote(path: string): Promise<void> { const relative = this.git.vaultPath(path); if (relative === undefined) return; const file = this.app.vault.getAbstractFileByPath(relative); if (file instanceof TFile) await this.openVaultFile(file); }
   previewText(title: string, text: string): void { const modal = new Modal(this.app); modal.titleEl.textContent = title; el(modal.contentEl, 'pre', 'gp-text-preview', text); modal.open(); }
   createBranch(start = 'HEAD'): void { new PromptModal(this.app, '创建并切换分支', [{ label: '分支名称' }, { label: '起始提交', value: start }], values => this.run('创建分支', () => this.git.branch('create', values[0], values[1]))).open(); }
   createTag(start = 'HEAD'): void { new PromptModal(this.app, '创建标签', [{ label: '标签名称' }, { label: '目标提交', value: start }], values => this.run('创建标签', () => this.git.tag('create', values[0], values[1]))).open(); }

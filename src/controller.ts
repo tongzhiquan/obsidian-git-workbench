@@ -50,23 +50,25 @@ export class RepositoryController {
     catch (e) { this.error = e instanceof Error ? e.message : String(e); this.notice(this.error); }
     finally { const failure = this.error; await this.refresh(); this.error = failure || this.error; this.busy = false; this.message = ''; this.emit(); }
   }
-  async log(filter: LogFilter, skip: number, limit: number): Promise<Commit[]> {
-    const key = JSON.stringify([filter, skip, limit]); return this.historyCache.get(key) ?? this.historyCache.set(key, await this.git.log(filter, skip, limit));
+  private async cached<T>(cache: LruCache<T>, key: string, read: () => Promise<T>): Promise<T> {
+    const cached = cache.get(key); if (cached !== undefined) return cached;
+    const generation = this.generation, value = await read();
+    if (this.alive && generation === this.generation) cache.set(key, value);
+    return value;
   }
-  async history(path: string, limit: number): Promise<Commit[]> { const key = `file:${path}:${limit}`; return this.historyCache.get(key) ?? this.historyCache.set(key, await this.git.history(path, limit)); }
+  async log(filter: LogFilter, skip: number, limit: number): Promise<Commit[]> {
+    return this.cached(this.historyCache, JSON.stringify([filter, skip, limit]), () => this.git.log(filter, skip, limit));
+  }
+  async history(path: string, limit: number): Promise<Commit[]> { return this.cached(this.historyCache, `file:${path}:${limit}`, () => this.git.history(path, limit)); }
   async blame(path: string, text: string): Promise<BlameLine[]> {
-    const key = `${path}:${this.status?.head}:${this.git.fingerprint(text)}`; return this.blameCache.get(key) ?? this.blameCache.set(key, await this.git.blame(path, text));
+    const key = `${path}:${this.status?.head}:${this.git.fingerprint(text)}`; return this.cached(this.blameCache, key, () => this.git.blame(path, text));
   }
   async diff(path: string, left: Revision, right: Revision, oldPath = path): Promise<FileDiff> {
-    const key = JSON.stringify([path, left, right, oldPath]), cached = this.diffCache.get(key);
-    if (cached) return cached;
-    const generation = this.generation, diff = await this.git.diff(path, left, right, oldPath);
-    if (generation === this.generation) this.diffCache.set(key, diff);
-    return diff;
+    return this.cached(this.diffCache, JSON.stringify([path, left, right, oldPath]), () => this.git.diff(path, left, right, oldPath));
   }
   async lineChange(path: string, blame: BlameLine, contents: string): Promise<BlameChange> {
     const key = JSON.stringify([path, blame.path, blame.hash, blame.originalLine, blame.line, blame.uncommitted ? this.git.fingerprint(contents) : '']);
-    return this.lineChangeCache.get(key) ?? this.lineChangeCache.set(key, await this.git.lineChange(path, blame, contents));
+    return this.cached(this.lineChangeCache, key, () => this.git.lineChange(path, blame, contents));
   }
   async automation(flush: () => Promise<void>): Promise<void> {
     if (this.busy || this.automationPaused || !this.git.repo || (!this.settings.autoCommit && !this.settings.autoSync)) return;
