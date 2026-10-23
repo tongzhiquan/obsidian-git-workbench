@@ -29,6 +29,12 @@ export interface Settings {
   sourceControlLayout: 'tree' | 'list';
   sourceControlVaultOnly: boolean;
   allowEditingStagedFiles: boolean;
+  aiProvider: 'openai' | 'deepseek' | 'custom';
+  aiBaseUrl: string;
+  aiModel: string;
+  aiApiKeyId: string;
+  aiPrompt: string;
+  aiMaxDiffChars: number;
 }
 export const DEFAULT_SETTINGS: Settings = {
   version: 1, gitPath: 'git', inlineBlame: true, fullBlame: false, gutter: true,
@@ -37,6 +43,12 @@ export const DEFAULT_SETTINGS: Settings = {
   sourceControlLayout: 'tree',
   sourceControlVaultOnly: false,
   allowEditingStagedFiles: false,
+  aiProvider: 'openai',
+  aiBaseUrl: 'https://api.openai.com/v1',
+  aiModel: 'gpt-5-mini',
+  aiApiKeyId: 'git-workbench-ai-api-key',
+  aiPrompt: '请根据暂存区差异生成一条准确、简洁的 Git 提交信息。只返回提交信息本身，不要使用 Markdown 代码块或解释。默认使用 Conventional Commits 格式，正文使用中文；如果没有必要，不要添加正文。',
+  aiMaxDiffChars: 120000,
 };
 export function revisionLabel(ref: Revision): string {
   return ref.kind === 'commit' ? ref.ref.slice(0, 12) : ({ index: '暂存区', worktree: '工作区', empty: '空版本' })[ref.kind];

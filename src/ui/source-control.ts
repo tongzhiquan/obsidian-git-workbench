@@ -39,6 +39,14 @@ export class SourceControlView extends ItemView {
     if (this.commitMessage.trim()) new ConfirmModal(this.app, '替换当前提交消息？', '将使用设置中的备份提交消息模板替换已输入的内容，只填入消息，不会暂存或提交文件。', fill, '替换消息').open();
     else fill();
   }
+  async generateAiMessage(): Promise<void> {
+    if (this.plugin.controller.busy) return;
+    const message = await this.plugin.generateAiCommitMessage();
+    if (message === undefined) return;
+    this.commitMessage = message;
+    const textarea = this.contentEl.querySelector<HTMLTextAreaElement>('.gp-commit-input');
+    if (textarea) { textarea.value = message; this.resizeMessage(textarea); textarea.dispatchEvent(new Event('input')); textarea.focus(); }
+  }
   private resizeMessage(text: HTMLTextAreaElement): void { text.style.height = 'auto'; text.style.height = `${Math.min(96, Math.max(38, text.scrollHeight))}px`; }
   async setLayout(layout: 'tree' | 'list'): Promise<void> {
     this.plugin.settings.sourceControlLayout = layout; this.scrollTop = 0;
@@ -116,6 +124,7 @@ export class SourceControlView extends ItemView {
     const messageBox = el(this.contentEl, 'div', 'gp-sc-message');
     const text = el(messageBox, 'textarea', 'gp-commit-input'); text.rows = 1; text.placeholder = '消息（Ctrl/Cmd+Enter 提交）'; text.setAttribute('aria-label', '提交消息'); text.value = this.commitMessage;
     const template = this.iconButton(messageBox, 'wand-sparkles', '填入备份消息', () => this.fillBackupMessage(), 'gp-fill-backup-message'); template.disabled = c.busy;
+    const ai = this.iconButton(messageBox, 'sparkles', '使用 AI 生成提交消息', () => void this.generateAiMessage(), 'gp-generate-ai-message'); ai.disabled = c.busy;
     const commitBar = el(this.contentEl, 'div', 'gp-commit-controls');
     const submit = button(commitBar, this.amend ? '修改上次提交' : '提交', () => this.commit(), 'mod-cta gp-submit');
     const commitMenu = this.iconButton(commitBar, 'chevron-down', '提交选项', () => this.showCommitMenu(commitMenu), 'mod-cta gp-commit-menu');
@@ -159,7 +168,7 @@ export class SourceControlView extends ItemView {
   }
   private updateControls(): void {
     const busy = this.plugin.controller.busy;
-    for (const control of this.contentEl.querySelectorAll<HTMLButtonElement>('.gp-sc-network button, .gp-sc-refresh, .gp-fill-backup-message, .gp-commit-menu, .gp-sc-stage, .gp-sc-operation button')) control.disabled = busy;
+    for (const control of this.contentEl.querySelectorAll<HTMLButtonElement>('.gp-sc-network button, .gp-sc-refresh, .gp-fill-backup-message, .gp-generate-ai-message, .gp-commit-menu, .gp-sc-stage, .gp-sc-operation button')) control.disabled = busy;
     const submit = this.contentEl.querySelector<HTMLButtonElement>('.gp-submit');
     if (submit) { submit.disabled = busy || !this.commitMessage.trim(); submit.textContent = this.amend ? '修改上次提交' : '提交'; }
   }

@@ -68,6 +68,10 @@ export class GitService {
     }
     return result;
   }
+  async stagedDiff(maxBytes = 8 * 1024 * 1024): Promise<string> {
+    this.root();
+    return this.runner.text(['diff', '--cached', '--no-ext-diff', '--no-textconv', '--no-color', '--binary'], { maxBytes });
+  }
   async resolveRef(ref: string): Promise<string> {
     if (!ref || ref.includes('\0') || ref.includes('\n')) throw new Error('无效版本引用');
     return (await this.runner.text(['rev-parse', '--verify', '--end-of-options', `${ref}^{commit}`])).trim();

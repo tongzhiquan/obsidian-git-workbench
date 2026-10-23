@@ -12,6 +12,8 @@ import { shell } from 'electron';
 import { lstat, stat } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import type { EditTarget, FileContent, PendingEdit } from './types';
+import { generateCommitMessage } from './ai';
+import { DEFAULT_AI_MODELS } from './ai-core';
 export default class GitWorkbench extends Plugin {
   settings: Settings = { ...DEFAULT_SETTINGS };
   git!: GitService;
@@ -31,6 +33,12 @@ export default class GitWorkbench extends Plugin {
     if (this.settings.sourceControlLayout !== 'list') this.settings.sourceControlLayout = 'tree';
     this.settings.sourceControlVaultOnly = this.settings.sourceControlVaultOnly === true;
     this.settings.allowEditingStagedFiles = this.settings.allowEditingStagedFiles === true;
+    if (!['openai', 'deepseek', 'custom'].includes(this.settings.aiProvider)) this.settings.aiProvider = DEFAULT_SETTINGS.aiProvider;
+    this.settings.aiBaseUrl = typeof this.settings.aiBaseUrl === 'string' ? this.settings.aiBaseUrl : DEFAULT_SETTINGS.aiBaseUrl;
+    this.settings.aiModel = typeof this.settings.aiModel === 'string' && this.settings.aiModel.trim() ? this.settings.aiModel : DEFAULT_SETTINGS.aiModel;
+    this.settings.aiApiKeyId = typeof this.settings.aiApiKeyId === 'string' && /^[a-z0-9-]+$/.test(this.settings.aiApiKeyId) ? this.settings.aiApiKeyId : DEFAULT_SETTINGS.aiApiKeyId;
+    this.settings.aiPrompt = typeof this.settings.aiPrompt === 'string' ? this.settings.aiPrompt : DEFAULT_SETTINGS.aiPrompt;
+    this.settings.aiMaxDiffChars = Math.max(1000, Math.min(500000, Number(this.settings.aiMaxDiffChars) || DEFAULT_SETTINGS.aiMaxDiffChars));
     // Preserve legacy data without loading or updating the retired draft records.
     // Editing content is now kept only in the current session until explicitly saved.
     if (data && typeof data === 'object' && !Array.isArray(data)) this.storedData = { ...data };
@@ -49,6 +57,7 @@ export default class GitWorkbench extends Plugin {
     this.addCommand({ id: 'unstage-file', name: '取消暂存当前笔记', callback: () => { const path = this.currentPath(); if (path) void this.run('取消暂存', () => this.git.unstage([path])); } });
     this.addCommand({ id: 'commit', name: '提交已暂存变化', callback: () => new PromptModal(this.app, '提交', [{ label: '提交消息（支持 {{date}}）', value: this.backupMessage(), multiline: true }], values => this.run('提交', async () => { await this.flushEditors(); await this.git.commit(formatCommitMessage(values[0])); })).open() });
     this.addCommand({ id: 'fill-backup-message', name: '填入备份格式提交消息', callback: () => { void this.openSourceControl().then(view => view.fillBackupMessage()); } });
+    this.addCommand({ id: 'generate-commit-message', name: '使用 AI 生成提交消息', callback: () => { void this.openSourceControl().then(view => view.generateAiMessage()); } });
     for (const action of ['fetch', 'pull', 'push'] as const) this.addCommand({ id: action, name: action === 'fetch' ? '获取远程变化' : action === 'pull' ? '拉取（仅快进）' : '推送', callback: () => void this.network(action) });
     this.addCommand({ id: 'sync', name: '同步（Fetch / Pull / Push）', callback: () => void this.run('同步', async () => { await this.flushEditors(); await this.git.network('fetch'); await this.git.network('pull'); await this.git.network('push'); }) });
     this.addCommand({ id: 'refresh', name: '刷新仓库', callback: () => void this.controller.refresh() });
@@ -155,6 +164,14 @@ export default class GitWorkbench extends Plugin {
   run<T>(label: string, work: () => Promise<T>): Promise<T | undefined> { return this.controller.run(label, work); }
   currentPath(): string | undefined { const file = this.app.workspace.getActiveFile(); return file && this.git.repo ? this.git.repoPath(file.path) : undefined; }
   backupMessage(): string { return formatCommitMessage(this.settings.commitTemplate); }
+  aiApiKey(): string { return this.app.secretStorage.getSecret(this.settings.aiApiKeyId) ?? ''; }
+  setAiApiKey(value: string): void { this.app.secretStorage.setSecret(this.settings.aiApiKeyId, value); }
+  async generateAiCommitMessage(): Promise<string | undefined> {
+    return this.run('生成提交消息', async () => {
+      await this.flushEditors();
+      return generateCommitMessage(this.settings, this.aiApiKey(), await this.git.stagedDiff());
+    });
+  }
   async openWorkbench(tab?: 'graph' | 'refs' | 'stash'): Promise<WorkbenchView> {
     let leaf = this.app.workspace.getLeavesOfType(WORKBENCH)[0]; if (!leaf) { leaf = this.app.workspace.getLeaf('tab'); await leaf.setViewState({ type: WORKBENCH, active: true }); }
     await this.app.workspace.revealLeaf(leaf); const view = leaf.view as WorkbenchView; if (tab) await view.show(tab); this.app.workspace.setActiveLeaf(leaf, { focus: true }); return view;
@@ -249,6 +266,20 @@ class GitWorkbenchSettings extends PluginSettingTab {
     for (const [key, name] of [['autoCommit', '定时暂存并提交全部变化'], ['autoSync', '定时提交并同步'], ['pullOnStartup', '启动时拉取（仅快进）']] as const) new Setting(parent).setName(name).addToggle(toggle => toggle.setValue(this.plugin.settings[key]).onChange(async value => { this.plugin.settings[key] = value; await this.plugin.persistSettings(); this.plugin.configureAutomation(); }));
     new Setting(parent).setName('周期（分钟）').addText(t => t.setValue(String(this.plugin.settings.intervalMinutes)).onChange(async value => { const n = Number(value); if (!Number.isFinite(n) || n < 1 || n > 1440) return; this.plugin.settings.intervalMinutes = n; await this.plugin.persistSettings(); this.plugin.configureAutomation(); }));
     new Setting(parent).setName('备份提交消息模板').setDesc('自动提交与手动“填入备份消息”共用；{{date}} 替换为本地时间，格式 YYYY-MM-DD HH:mm:ss。').addText(t => t.setValue(this.plugin.settings.commitTemplate).onChange(async value => { this.plugin.settings.commitTemplate = value || DEFAULT_SETTINGS.commitTemplate; await this.plugin.persistSettings(); }));
+    el(parent, 'h3', '', 'AI 提交消息');
+    el(parent, 'p', 'gp-muted', '只在手动点击生成时发送暂存区 diff；API Key 使用 Obsidian SecretStorage 保存。OpenAI、DeepSeek 和自定义地址使用 OpenAI 兼容的 Chat Completions 接口。');
+    new Setting(parent).setName('AI 服务').addDropdown(dropdown => dropdown
+      .addOption('openai', 'OpenAI').addOption('deepseek', 'DeepSeek').addOption('custom', '自定义兼容接口')
+      .setValue(this.plugin.settings.aiProvider).onChange(async value => {
+        const provider = value as typeof this.plugin.settings.aiProvider;
+        if (provider !== 'custom' && this.plugin.settings.aiModel === (provider === 'openai' ? DEFAULT_AI_MODELS.deepseek : DEFAULT_AI_MODELS.openai)) this.plugin.settings.aiModel = DEFAULT_AI_MODELS[provider];
+        this.plugin.settings.aiProvider = provider; await this.plugin.persistSettings(); this.display();
+      }));
+    new Setting(parent).setName('API 地址').setDesc('自定义服务使用；会自动追加 /chat/completions。').addText(t => t.setValue(this.plugin.settings.aiBaseUrl).onChange(async value => { this.plugin.settings.aiBaseUrl = value.trim(); await this.plugin.persistSettings(); }));
+    new Setting(parent).setName('模型名称').addText(t => t.setValue(this.plugin.settings.aiModel).onChange(async value => { this.plugin.settings.aiModel = value.trim(); await this.plugin.persistSettings(); }));
+    new Setting(parent).setName('API Key').setDesc('不会写入插件 data.json。').addText(t => { t.inputEl.type = 'password'; t.setValue(this.plugin.aiApiKey()).onChange(value => this.plugin.setAiApiKey(value)); });
+    new Setting(parent).setName('最大 diff 字符数').setDesc('超过后截断，避免请求过大。').addText(t => t.setValue(String(this.plugin.settings.aiMaxDiffChars)).onChange(async value => { const n = Number(value); if (!Number.isFinite(n) || n < 1000 || n > 500000) return; this.plugin.settings.aiMaxDiffChars = Math.round(n); await this.plugin.persistSettings(); }));
+    new Setting(parent).setName('生成提示词').setDesc('发送给模型的额外规则。').addTextArea(t => t.setValue(this.plugin.settings.aiPrompt).onChange(async value => { this.plugin.settings.aiPrompt = value; await this.plugin.persistSettings(); }));
     new Setting(parent).setName('恢复自动备份').setDesc(this.plugin.controller.automationPaused ? '已暂停：先处理错误，再恢复定时任务。' : '当前未暂停').addButton(b => b.setButtonText('恢复').onClick(() => { this.plugin.controller.automationPaused = false; this.plugin.controller.emit(); this.display(); }));
   }
 }
