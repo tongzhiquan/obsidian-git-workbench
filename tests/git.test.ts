@@ -304,7 +304,8 @@ test('automatic commits whole repository, leaves default idle and pauses on fail
   try {
     await f.seed('笔记库/note.md', 'base\n'); await writeFile(join(f.root, 'outside.md'), 'whole repo\n'); await controller.refresh();
     await controller.automation(async()=>{}); assert.equal((await f.git.status()).files.length, 1);
-    settings.autoCommit = true; await controller.automation(async()=>{}); assert.equal((await f.git.status()).files.length, 0); assert.match((await f.git.log())[0].subject, /^vault backup: \d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/);
+    settings.autoCommit = true; await controller.automation(async()=>{}); assert.equal((await f.git.status()).files.length, 1);
+    settings.autoBackup = true; await controller.automation(async()=>{}); assert.equal((await f.git.status()).files.length, 0); assert.match((await f.git.log())[0].subject, /^vault backup: \d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/);
     settings.autoSync = true; await controller.automation(async()=>{}); assert.equal(controller.automationPaused, true); assert.ok(notices.some(s=>s.includes('已暂停')));
     await writeFile(join(f.root, 'another.md'), 'stay pending\n'); await controller.automation(async()=>{}); assert.equal((await f.git.status()).files.length, 1);
   } finally { controller.dispose(); await f.close(); }

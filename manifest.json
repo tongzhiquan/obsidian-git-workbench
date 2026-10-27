@@ -1,7 +1,7 @@
 {
   "id": "git-workbench",
   "name": "Git Workbench",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "minAppVersion": "1.14.4",
   "description": "提交图、笔记历史、版本比较、行内归属和完整 Git 工作台。",
   "author": "tongzhiquan",

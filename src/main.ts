@@ -14,6 +14,7 @@ import { dirname, resolve } from 'node:path';
 import type { EditTarget, FileContent, PendingEdit } from './types';
 import { generateCommitMessage } from './ai';
 import { DEFAULT_AI_MODELS } from './ai-core';
+import { normalizeAiPrompt } from './ai-prompt';
 export default class GitWorkbench extends Plugin {
   settings: Settings = { ...DEFAULT_SETTINGS };
   git!: GitService;
@@ -29,7 +30,11 @@ export default class GitWorkbench extends Plugin {
   private unloaded = false;
   async onload(): Promise<void> {
     if (!Platform.isDesktopApp || !(this.app.vault.adapter instanceof FileSystemAdapter)) { new Notice('Git Workbench 需要桌面文件系统笔记库'); return; }
-    const data = await this.loadData(); this.settings = { ...DEFAULT_SETTINGS, ...data?.settings };
+    const data = await this.loadData();
+    const savedSettings = data && typeof data === 'object' && !Array.isArray(data) && data.settings && typeof data.settings === 'object' && !Array.isArray(data.settings)
+      ? data.settings as Partial<Settings> : undefined;
+    this.settings = { ...DEFAULT_SETTINGS, ...savedSettings };
+    if (typeof savedSettings?.autoBackup !== 'boolean') this.settings.autoBackup = this.settings.autoCommit || this.settings.autoSync || this.settings.pullOnStartup;
     if (this.settings.sourceControlLayout !== 'list') this.settings.sourceControlLayout = 'tree';
     this.settings.sourceControlVaultOnly = this.settings.sourceControlVaultOnly === true;
     this.settings.allowEditingStagedFiles = this.settings.allowEditingStagedFiles === true;
@@ -37,7 +42,7 @@ export default class GitWorkbench extends Plugin {
     this.settings.aiBaseUrl = typeof this.settings.aiBaseUrl === 'string' ? this.settings.aiBaseUrl : DEFAULT_SETTINGS.aiBaseUrl;
     this.settings.aiModel = typeof this.settings.aiModel === 'string' && this.settings.aiModel.trim() ? this.settings.aiModel : DEFAULT_SETTINGS.aiModel;
     this.settings.aiApiKeyId = typeof this.settings.aiApiKeyId === 'string' && /^[a-z0-9-]+$/.test(this.settings.aiApiKeyId) ? this.settings.aiApiKeyId : DEFAULT_SETTINGS.aiApiKeyId;
-    this.settings.aiPrompt = typeof this.settings.aiPrompt === 'string' ? this.settings.aiPrompt : DEFAULT_SETTINGS.aiPrompt;
+    this.settings.aiPrompt = normalizeAiPrompt(this.settings.aiPrompt);
     this.settings.aiMaxDiffChars = Math.max(1000, Math.min(500000, Number(this.settings.aiMaxDiffChars) || DEFAULT_SETTINGS.aiMaxDiffChars));
     // Preserve legacy data without loading or updating the retired draft records.
     // Editing content is now kept only in the current session until explicitly saved.
@@ -56,7 +61,7 @@ export default class GitWorkbench extends Plugin {
     this.addCommand({ id: 'stage-file', name: '暂存当前笔记', callback: () => { const path = this.currentPath(); if (path) void this.run('暂存当前笔记', async () => { await this.flushEditors(); await this.git.stage([path]); }); } });
     this.addCommand({ id: 'unstage-file', name: '取消暂存当前笔记', callback: () => { const path = this.currentPath(); if (path) void this.run('取消暂存', () => this.git.unstage([path])); } });
     this.addCommand({ id: 'commit', name: '提交已暂存变化', callback: () => new PromptModal(this.app, '提交', [{ label: '提交消息（支持 {{date}}）', value: this.backupMessage(), multiline: true }], values => this.run('提交', async () => { await this.flushEditors(); await this.git.commit(formatCommitMessage(values[0])); })).open() });
-    this.addCommand({ id: 'fill-backup-message', name: '填入备份格式提交消息', callback: () => { void this.openSourceControl().then(view => view.fillBackupMessage()); } });
+    this.addCommand({ id: 'fill-backup-message', name: '填入当前时间备份消息', callback: () => { void this.openSourceControl().then(view => view.fillBackupMessage()); } });
     this.addCommand({ id: 'generate-commit-message', name: '使用 AI 生成提交消息', callback: () => { void this.openSourceControl().then(view => view.generateAiMessage()); } });
     for (const action of ['fetch', 'pull', 'push'] as const) this.addCommand({ id: action, name: action === 'fetch' ? '获取远程变化' : action === 'pull' ? '拉取（仅快进）' : '推送', callback: () => void this.network(action) });
     this.addCommand({ id: 'sync', name: '同步（Fetch / Pull / Push）', callback: () => void this.run('同步', async () => { await this.flushEditors(); await this.git.network('fetch'); await this.git.network('pull'); await this.git.network('push'); }) });
@@ -89,7 +94,7 @@ export default class GitWorkbench extends Plugin {
     this.app.workspace.onLayoutReady(() => {
       if (this.unloaded) return;
       void this.openSourceControl(false).catch(error => new Notice(`打开源代码管理失败：${error instanceof Error ? error.message : error}`, 8000));
-      if (this.settings.pullOnStartup && this.git.repo) void this.run('启动拉取', () => this.git.network('pull'));
+      if (this.settings.autoBackup && this.settings.pullOnStartup && this.git.repo) void this.run('启动拉取', () => this.git.network('pull'));
     });
   }
   persistSettings(): Promise<void> { const data = { ...this.storedData, settings: { ...this.settings } }; this.saveTail = this.saveTail.catch(() => {}).then(() => this.saveData(data)); return this.saveTail; }
@@ -151,7 +156,7 @@ export default class GitWorkbench extends Plugin {
   }
   configureAutomation(): void {
     if (this.autoTimer) window.clearInterval(this.autoTimer);
-    if (this.settings.autoCommit || this.settings.autoSync) this.autoTimer = window.setInterval(() => void this.controller.automation(() => this.flushEditors()), this.settings.intervalMinutes * 60000);
+    if (this.settings.autoBackup && (this.settings.autoCommit || this.settings.autoSync)) this.autoTimer = window.setInterval(() => void this.controller.automation(() => this.flushEditors()), this.settings.intervalMinutes * 60000);
   }
   async flushEditors(): Promise<void> {
     const saves: Promise<void>[] = [];
@@ -251,7 +256,6 @@ class GitWorkbenchSettings extends PluginSettingTab {
   constructor(private plugin: GitWorkbench) { super(plugin.app, plugin); }
   display(): void {
     const parent = this.containerEl; parent.replaceChildren(); el(parent, 'h2', '', 'Git Workbench');
-    new Setting(parent).setName('Git 可执行文件').setDesc('使用系统 Git；修改后重新加载插件。').addText(text => text.setValue(this.plugin.settings.gitPath).onChange(async value => { this.plugin.settings.gitPath = value.trim() || 'git'; await this.plugin.persistSettings(); }));
     new Setting(parent).setName('环境诊断').setDesc('查看仓库路径、Git 版本、提交身份和认证配置。').addButton(b => b.setButtonText('检测').onClick(async () => this.plugin.previewText('Git 环境诊断', await this.plugin.git.diagnostics())));
     for (const [key, name, description] of [
       ['inlineBlame', '当前行修改归属', '在光标所在行末尾，以灰色显示最后修改此行的作者、日期和提交摘要。悬停可查看提交与行差异；尚未提交或未保存的修改会显示对应状态。'],
@@ -262,10 +266,6 @@ class GitWorkbenchSettings extends PluginSettingTab {
       if (this.plugin.indexEdits.size) { toggle.setValue(this.plugin.settings.allowEditingStagedFiles); new Notice('请先保存暂存区中的修改'); return; }
       this.plugin.settings.allowEditingStagedFiles = value; await this.plugin.persistSettings(); this.plugin.controller.invalidate(); this.plugin.controller.emit();
     }));
-    el(parent, 'h3', '', '自动备份'); el(parent, 'p', 'gp-muted', '自动备份管理整个 Git 仓库，包含当前笔记库外文件。遇到冲突、分叉或认证失败会暂停。所有选项默认关闭。');
-    for (const [key, name] of [['autoCommit', '定时暂存并提交全部变化'], ['autoSync', '定时提交并同步'], ['pullOnStartup', '启动时拉取（仅快进）']] as const) new Setting(parent).setName(name).addToggle(toggle => toggle.setValue(this.plugin.settings[key]).onChange(async value => { this.plugin.settings[key] = value; await this.plugin.persistSettings(); this.plugin.configureAutomation(); }));
-    new Setting(parent).setName('周期（分钟）').addText(t => t.setValue(String(this.plugin.settings.intervalMinutes)).onChange(async value => { const n = Number(value); if (!Number.isFinite(n) || n < 1 || n > 1440) return; this.plugin.settings.intervalMinutes = n; await this.plugin.persistSettings(); this.plugin.configureAutomation(); }));
-    new Setting(parent).setName('备份提交消息模板').setDesc('自动提交与手动“填入备份消息”共用；{{date}} 替换为本地时间，格式 YYYY-MM-DD HH:mm:ss。').addText(t => t.setValue(this.plugin.settings.commitTemplate).onChange(async value => { this.plugin.settings.commitTemplate = value || DEFAULT_SETTINGS.commitTemplate; await this.plugin.persistSettings(); }));
     el(parent, 'h3', '', 'AI 提交消息');
     el(parent, 'p', 'gp-muted', '只在手动点击生成时发送暂存区 diff；API Key 使用 Obsidian SecretStorage 保存。OpenAI、DeepSeek 和自定义地址使用 OpenAI 兼容的 Chat Completions 接口。');
     new Setting(parent).setName('AI 服务').addDropdown(dropdown => dropdown
@@ -279,7 +279,15 @@ class GitWorkbenchSettings extends PluginSettingTab {
     new Setting(parent).setName('模型名称').addText(t => t.setValue(this.plugin.settings.aiModel).onChange(async value => { this.plugin.settings.aiModel = value.trim(); await this.plugin.persistSettings(); }));
     new Setting(parent).setName('API Key').setDesc('不会写入插件 data.json。').addText(t => { t.inputEl.type = 'password'; t.setValue(this.plugin.aiApiKey()).onChange(value => this.plugin.setAiApiKey(value)); });
     new Setting(parent).setName('最大 diff 字符数').setDesc('超过后截断，避免请求过大。').addText(t => t.setValue(String(this.plugin.settings.aiMaxDiffChars)).onChange(async value => { const n = Number(value); if (!Number.isFinite(n) || n < 1000 || n > 500000) return; this.plugin.settings.aiMaxDiffChars = Math.round(n); await this.plugin.persistSettings(); }));
-    new Setting(parent).setName('生成提示词').setDesc('发送给模型的额外规则。').addTextArea(t => t.setValue(this.plugin.settings.aiPrompt).onChange(async value => { this.plugin.settings.aiPrompt = value; await this.plugin.persistSettings(); }));
-    new Setting(parent).setName('恢复自动备份').setDesc(this.plugin.controller.automationPaused ? '已暂停：先处理错误，再恢复定时任务。' : '当前未暂停').addButton(b => b.setButtonText('恢复').onClick(() => { this.plugin.controller.automationPaused = false; this.plugin.controller.emit(); this.display(); }));
+    new Setting(parent).setName('生成提示词').setDesc('默认参照 git-commit-message 规范：标题最多 50 字符、中文要点正文、按需说明破坏性变更。可编辑完整约束。').setClass('gp-ai-prompt').addTextArea(t => {
+      t.inputEl.rows = 16; t.inputEl.setAttribute('aria-label', 'AI 提交消息生成提示词');
+      t.setValue(this.plugin.settings.aiPrompt).onChange(async value => { this.plugin.settings.aiPrompt = value; await this.plugin.persistSettings(); });
+    }).addButton(b => b.setButtonText('恢复默认约束').onClick(async () => { this.plugin.settings.aiPrompt = DEFAULT_SETTINGS.aiPrompt; await this.plugin.persistSettings(); this.display(); }));
+    el(parent, 'h3', '', '自动备份'); el(parent, 'p', 'gp-muted', '自动备份管理整个 Git 仓库，包含当前笔记库外文件。遇到冲突、分叉或认证失败会暂停。所有选项默认关闭。');
+    new Setting(parent).setName('启用自动备份').setDesc('关闭后停止定时提交、同步和启动时拉取；开启后按下方选项执行。').addToggle(toggle => toggle.setValue(this.plugin.settings.autoBackup).onChange(async value => { this.plugin.settings.autoBackup = value; await this.plugin.persistSettings(); this.plugin.configureAutomation(); this.plugin.controller.emit(); this.display(); }));
+    for (const [key, name] of [['autoCommit', '定时暂存并提交全部变化'], ['autoSync', '定时提交并同步'], ['pullOnStartup', '启动时拉取（仅快进）']] as const) new Setting(parent).setName(name).addToggle(toggle => toggle.setValue(this.plugin.settings[key]).onChange(async value => { this.plugin.settings[key] = value; await this.plugin.persistSettings(); this.plugin.configureAutomation(); }));
+    new Setting(parent).setName('周期（分钟）').addText(t => t.setValue(String(this.plugin.settings.intervalMinutes)).onChange(async value => { const n = Number(value); if (!Number.isFinite(n) || n < 1 || n > 1440) return; this.plugin.settings.intervalMinutes = n; await this.plugin.persistSettings(); this.plugin.configureAutomation(); }));
+    new Setting(parent).setName('备份提交消息模板').setDesc('自动提交与手动“填入当前时间备份消息”共用；{{date}} 替换为本地时间，格式 YYYY-MM-DD HH:mm:ss。').addText(t => t.setValue(this.plugin.settings.commitTemplate).onChange(async value => { this.plugin.settings.commitTemplate = value || DEFAULT_SETTINGS.commitTemplate; await this.plugin.persistSettings(); }));
+    if (this.plugin.settings.autoBackup && this.plugin.controller.automationPaused) new Setting(parent).setName('自动备份因错误暂停').setDesc('请先处理冲突、分叉、认证或网络错误，再解除暂停。解除后从下个周期继续执行。').addButton(b => b.setButtonText('解除错误暂停').onClick(() => { this.plugin.controller.automationPaused = false; this.plugin.controller.emit(); this.display(); }));
   }
 }

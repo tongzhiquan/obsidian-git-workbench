@@ -2,16 +2,20 @@
 
 按 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/) 记录用户可见变化，版本号遵循语义化版本。发布约定见 [开发指南](CONTRIBUTING.md)。
 
-## 未发布
+## [0.4.0] - 2026-10-27
 
 ### 新增
 
 - 源代码管理提交框支持通过 OpenAI、DeepSeek 或自定义 OpenAI 兼容接口生成提交消息；设置中可配置模型、提示词和 diff 限长，API Key 使用 Obsidian SecretStorage 保存。
+- AI 默认使用 DeepSeek 连接；提交框右侧使用原备份按钮位置生成 AI 消息，备份模板入口移至提交菜单并改用时间图标。
+- 自动备份设置移至设置页末尾，并新增位于该分组首项的总开关。
 - 源代码管理支持仅显示当前笔记库的变更；漏斗图标与更多菜单同步并记住选择，列表、计数及批量暂存范围随之更新。
 - 源代码管理文件右键菜单支持在系统资源管理器中定位文件，包括笔记库外文件；已删除文件打开最近仍存在的父目录。
 
 ### 改进
 
+- 自动备份仅在因错误暂停时显示解除暂停入口；移除 Git 可执行文件设置项。
+- AI 默认提交约束参照 git-commit-message 技能，补充标题长度、类型、中文要点正文和破坏性变更说明；可编辑并恢复默认约束，升级保留自定义提示词。
 - 源代码管理刷新保留工具栏、提交消息及选区；文件状态未变化时保留列表、滚动位置和焦点。
 - 文件菜单和比较区打开文件时复用已有标签，并发打开同一文件只创建一个标签。
 
@@ -88,6 +92,7 @@
 - 本地路径配置、构建与打包、CLI 重载、隔离仓库与 Obsidian 集成验证脚本。
 - MIT 许可证及第三方许可声明。
 
+[0.4.0]: https://github.com/tongzhiquan/obsidian-git-workbench/releases/tag/0.4.0
 [0.3.0]: https://github.com/tongzhiquan/obsidian-git-workbench/releases/tag/0.3.0
 [0.2.0]: https://github.com/tongzhiquan/obsidian-git-workbench/releases/tag/v0.2.0
 [0.1.3]: https://github.com/tongzhiquan/obsidian-git-workbench/releases/tag/v0.1.3

@@ -74,7 +74,7 @@ export class SourceControlView extends ItemView {
   }
   private showCommitMenu(anchor: HTMLElement): void {
     const menu = new Menu(), busy = this.plugin.controller.busy;
-    menu.addItem(i => i.setTitle('填入备份消息').setIcon('wand-sparkles').setDisabled(busy).onClick(() => this.fillBackupMessage()));
+    menu.addItem(i => i.setTitle('填入当前时间备份消息').setIcon('calendar-clock').setDisabled(busy).onClick(() => this.fillBackupMessage()));
     menu.addItem(i => i.setTitle('修改上次提交（Amend）').setIcon('git-commit-horizontal').setChecked(this.amend).setDisabled(busy).onClick(() => { this.amend = !this.amend; this.render(); }));
     menu.addItem(i => i.setTitle('Amend 的作用').setIcon('circle-help').onClick(() => this.plugin.previewText('Amend：修改上次提交', '普通提交：新增一条提交记录。\n\nAmend：用当前消息和暂存区内容替换最近一次提交。适合补上漏掉的文件或修正提交消息，提交总数不会增加，但 SHA 会改变。\n\n当前插件会将输入框中的消息作为新提交消息；需要保留原消息时，请填写原消息。\n\n已推送的提交通常不要使用 Amend，因为改写后会与远程历史不同。')));
     const rect = anchor.getBoundingClientRect(); menu.showAtPosition({ x: rect.right, y: rect.bottom }, anchor.ownerDocument);
@@ -123,8 +123,7 @@ export class SourceControlView extends ItemView {
     el(this.contentEl, 'div', 'gp-sc-feedback');
     const messageBox = el(this.contentEl, 'div', 'gp-sc-message');
     const text = el(messageBox, 'textarea', 'gp-commit-input'); text.rows = 1; text.placeholder = '消息（Ctrl/Cmd+Enter 提交）'; text.setAttribute('aria-label', '提交消息'); text.value = this.commitMessage;
-    const template = this.iconButton(messageBox, 'wand-sparkles', '填入备份消息', () => this.fillBackupMessage(), 'gp-fill-backup-message'); template.disabled = c.busy;
-    const ai = this.iconButton(messageBox, 'sparkles', '使用 AI 生成提交消息', () => void this.generateAiMessage(), 'gp-generate-ai-message'); ai.disabled = c.busy;
+    const ai = this.iconButton(messageBox, 'wand-sparkles', '使用 AI 生成提交消息', () => void this.generateAiMessage(), 'gp-generate-ai-message'); ai.disabled = c.busy;
     const commitBar = el(this.contentEl, 'div', 'gp-commit-controls');
     const submit = button(commitBar, this.amend ? '修改上次提交' : '提交', () => this.commit(), 'mod-cta gp-submit');
     const commitMenu = this.iconButton(commitBar, 'chevron-down', '提交选项', () => this.showCommitMenu(commitMenu), 'mod-cta gp-commit-menu');
@@ -161,14 +160,14 @@ export class SourceControlView extends ItemView {
   }
   private renderFeedback(): void {
     const parent = this.contentEl.querySelector<HTMLElement>('.gp-sc-feedback'); if (!parent) return;
-    const c = this.plugin.controller, key = JSON.stringify([c.busy, c.error, c.message, c.automationPaused]);
+    const c = this.plugin.controller, key = JSON.stringify([c.busy, c.error, c.message, c.automationPaused, this.plugin.settings.autoBackup]);
     if (this.feedbackKey === key) return; this.feedbackKey = key; parent.replaceChildren();
     if (c.busy || c.error) el(parent, 'p', c.error ? 'gp-error gp-sc-notice' : 'gp-muted gp-sc-notice', c.error || c.message + '…');
-    if (c.automationPaused) el(parent, 'p', 'gp-error gp-sc-notice', '自动备份已暂停，在设置中恢复。');
+    if (this.plugin.settings.autoBackup && c.automationPaused) el(parent, 'p', 'gp-error gp-sc-notice', '自动备份因错误暂停，请在设置中处理错误并解除暂停。');
   }
   private updateControls(): void {
     const busy = this.plugin.controller.busy;
-    for (const control of this.contentEl.querySelectorAll<HTMLButtonElement>('.gp-sc-network button, .gp-sc-refresh, .gp-fill-backup-message, .gp-generate-ai-message, .gp-commit-menu, .gp-sc-stage, .gp-sc-operation button')) control.disabled = busy;
+    for (const control of this.contentEl.querySelectorAll<HTMLButtonElement>('.gp-sc-network button, .gp-sc-refresh, .gp-generate-ai-message, .gp-commit-menu, .gp-sc-stage, .gp-sc-operation button')) control.disabled = busy;
     const submit = this.contentEl.querySelector<HTMLButtonElement>('.gp-submit');
     if (submit) { submit.disabled = busy || !this.commitMessage.trim(); submit.textContent = this.amend ? '修改上次提交' : '提交'; }
   }

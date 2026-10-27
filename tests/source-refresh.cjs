@@ -48,12 +48,12 @@ module.exports = async ({ js, check }) => {
     }), 'focused composer does not block branch, tracking or operation updates and operation callbacks use the current action');
     check(await run(() => {
       const p = app.plugins.plugins['git-workbench'], c = p.controller, view = app.workspace.getLeavesOfType('git-workbench-source-control')[0].view;
-      const error = c.error, paused = c.automationPaused, input = view.contentEl.querySelector('.gp-commit-input');
+      const error = c.error, paused = c.automationPaused, enabled = p.settings.autoBackup, input = view.contentEl.querySelector('.gp-commit-input');
       try {
-        c.error = 'QA 错误提示'; c.automationPaused = true; c.emit();
+        c.error = 'QA 错误提示'; p.settings.autoBackup = true; c.automationPaused = true; c.emit();
         const notice = view.contentEl.querySelector('.gp-sc-feedback p'); c.emit();
         return view.contentEl.querySelectorAll('.gp-sc-feedback p').length === 2 && view.contentEl.querySelector('.gp-sc-feedback p') === notice && notice.textContent === 'QA 错误提示' && view.contentEl.querySelector('.gp-commit-input') === input;
-      } finally { c.error = error; c.automationPaused = paused; view.render(); }
+      } finally { c.error = error; c.automationPaused = paused; p.settings.autoBackup = enabled; view.render(); }
     }), 'error and automation feedback refresh without duplicate notices or composer replacement');
     check(await run(() => {
       const p = app.plugins.plugins['git-workbench'], c = p.controller, repo = p.git.repo, error = c.error, view = app.workspace.getLeavesOfType('git-workbench-source-control')[0].view;

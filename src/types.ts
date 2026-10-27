@@ -1,3 +1,4 @@
+import { DEFAULT_AI_PROMPT } from './ai-prompt';
 export type Revision = { kind: 'commit'; ref: string } | { kind: 'index' } | { kind: 'worktree' } | { kind: 'empty' };
 export const HEAD: Revision = { kind: 'commit', ref: 'HEAD' };
 export const INDEX: Revision = { kind: 'index' };
@@ -24,7 +25,7 @@ export interface Conflict { path: string; base: FileContent; ours: FileContent; 
 export interface Stash { ref: string; hash: string; subject: string }
 export interface Settings {
   version: 1; gitPath: string; inlineBlame: boolean; fullBlame: boolean; gutter: boolean;
-  diffMode: 'split' | 'unified'; pageSize: number; autoCommit: boolean; autoSync: boolean;
+  diffMode: 'split' | 'unified'; pageSize: number; autoBackup: boolean; autoCommit: boolean; autoSync: boolean;
   pullOnStartup: boolean; intervalMinutes: number; commitTemplate: string;
   sourceControlLayout: 'tree' | 'list';
   sourceControlVaultOnly: boolean;
@@ -38,16 +39,16 @@ export interface Settings {
 }
 export const DEFAULT_SETTINGS: Settings = {
   version: 1, gitPath: 'git', inlineBlame: true, fullBlame: false, gutter: true,
-  diffMode: 'split', pageSize: 200, autoCommit: false, autoSync: false,
+  diffMode: 'split', pageSize: 200, autoBackup: false, autoCommit: false, autoSync: false,
   pullOnStartup: false, intervalMinutes: 10, commitTemplate: 'vault backup: {{date}}',
   sourceControlLayout: 'tree',
   sourceControlVaultOnly: false,
   allowEditingStagedFiles: false,
-  aiProvider: 'openai',
-  aiBaseUrl: 'https://api.openai.com/v1',
-  aiModel: 'gpt-5-mini',
+  aiProvider: 'deepseek',
+  aiBaseUrl: 'https://api.deepseek.com',
+  aiModel: 'deepseek-chat',
   aiApiKeyId: 'git-workbench-ai-api-key',
-  aiPrompt: '请根据暂存区差异生成一条准确、简洁的 Git 提交信息。只返回提交信息本身，不要使用 Markdown 代码块或解释。默认使用 Conventional Commits 格式，正文使用中文；如果没有必要，不要添加正文。',
+  aiPrompt: DEFAULT_AI_PROMPT,
   aiMaxDiffChars: 120000,
 };
 export function revisionLabel(ref: Revision): string {

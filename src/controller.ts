@@ -71,7 +71,7 @@ export class RepositoryController {
     return this.cached(this.lineChangeCache, key, () => this.git.lineChange(path, blame, contents));
   }
   async automation(flush: () => Promise<void>): Promise<void> {
-    if (this.busy || this.automationPaused || !this.git.repo || (!this.settings.autoCommit && !this.settings.autoSync)) return;
+    if (this.busy || this.automationPaused || !this.git.repo || !this.settings.autoBackup || (!this.settings.autoCommit && !this.settings.autoSync)) return;
     let failed = false;
     await this.run('自动备份', async () => {
       try {
