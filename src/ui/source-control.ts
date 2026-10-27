@@ -57,6 +57,9 @@ export class SourceControlView extends ItemView {
     const control = this.contentEl.querySelector<HTMLButtonElement>('.gp-sc-layout'); if (!control) return;
     const tree = this.plugin.settings.sourceControlLayout === 'tree';
     setIcon(control, tree ? 'list' : 'list-tree'); setTooltip(control, tree ? '以列表形式查看' : '以树形式查看');
+    for (const selector of ['.gp-sc-collapse', '.gp-sc-expand']) {
+      const action = this.contentEl.querySelector<HTMLButtonElement>(selector); if (action) action.disabled = !tree;
+    }
   }
   private visibleFiles(): FileStatus[] {
     return scopedSourceFiles(this.plugin.controller.status?.files ?? [], this.plugin.git.repo?.vaultPrefix ?? '', this.plugin.settings.sourceControlVaultOnly);
@@ -83,15 +86,17 @@ export class SourceControlView extends ItemView {
     const menu = new Menu();
     for (const [layout, title, icon] of [['list', '以列表形式查看', 'list'], ['tree', '以树形式查看', 'list-tree']] as const) menu.addItem(i => i.setTitle(title).setIcon(icon).setChecked(this.plugin.settings.sourceControlLayout === layout).onClick(() => this.setLayout(layout)));
     menu.addItem(i => i.setTitle('仅显示当前笔记库的变更').setIcon('filter').setChecked(this.plugin.settings.sourceControlVaultOnly).onClick(() => this.setVaultOnly(!this.plugin.settings.sourceControlVaultOnly)));
-    menu.addItem(i => i.setTitle('全部展开').setIcon('unfold-vertical').onClick(() => { this.collapsed.clear(); this.renderFiles(); }));
-    menu.addItem(i => i.setTitle('折叠所有文件夹').setIcon('fold-vertical').onClick(() => {
-      for (const row of sourceRows(this.visibleFiles(), 'tree', new Set())) if (row.kind === 'folder') this.collapsed.add(row.key);
-      this.renderFiles();
-    }));
+    menu.addItem(i => i.setTitle('全部展开').setIcon('chevrons-up-down').onClick(() => this.expandAll()));
+    menu.addItem(i => i.setTitle('折叠所有文件夹').setIcon('chevrons-down-up').onClick(() => this.collapseAll()));
     menu.addSeparator();
     menu.addItem(i => i.setTitle('打开 Git Workbench 工作台').setIcon(GIT_WORKBENCH_ICON).onClick(() => this.plugin.openWorkbench()));
     menu.addItem(i => i.setTitle('仓库操作…').setIcon('git-branch').onClick(() => this.plugin.repositoryMenu(anchor)));
     const rect = anchor.getBoundingClientRect(); menu.showAtPosition({ x: rect.right, y: rect.bottom }, anchor.ownerDocument);
+  }
+  private expandAll(): void { this.collapsed.clear(); this.renderFiles(); }
+  private collapseAll(): void {
+    for (const row of sourceRows(this.visibleFiles(), 'tree', new Set())) if (row.kind === 'folder') this.collapsed.add(row.key);
+    this.renderFiles();
   }
   private commit(): void {
     if (this.plugin.controller.busy) return;
@@ -109,7 +114,10 @@ export class SourceControlView extends ItemView {
     this.disposeList?.(); this.disposeList = undefined;
     this.contentEl.replaceChildren(); this.contentEl.className = 'view-content gp-source-control'; const c = this.plugin.controller;
     const header = el(this.contentEl, 'div', 'gp-sc-header'); el(header, 'strong', '', '源代码管理');
-    this.iconButton(header, 'list', '以列表形式查看', () => this.setLayout(this.plugin.settings.sourceControlLayout === 'tree' ? 'list' : 'tree'), 'gp-sc-layout'); this.updateLayoutButton();
+    this.iconButton(header, 'list', '以列表形式查看', () => this.setLayout(this.plugin.settings.sourceControlLayout === 'tree' ? 'list' : 'tree'), 'gp-sc-layout');
+    this.iconButton(header, 'chevrons-down-up', '折叠所有文件夹', () => this.collapseAll(), 'gp-sc-collapse');
+    this.iconButton(header, 'chevrons-up-down', '全部展开', () => this.expandAll(), 'gp-sc-expand');
+    this.updateLayoutButton();
     this.iconButton(header, 'refresh-cw', '刷新仓库', () => c.refresh(), 'gp-sc-refresh').disabled = c.busy;
     this.iconButton(header, 'filter', '仅显示当前笔记库的变更', () => this.setVaultOnly(!this.plugin.settings.sourceControlVaultOnly), 'gp-sc-filter'); this.updateFilterButton();
     this.iconButton(header, GIT_WORKBENCH_ICON, '打开 Git Workbench 工作台', () => this.plugin.openWorkbench(), 'gp-sc-workbench');

@@ -152,7 +152,8 @@ button.gp-file-link:hover { color: var(--interactive-accent); background: var(--
 .gp-sc-header strong { flex: 1; font-size: 12px; }
 .gp-sc-header button.gp-icon-button { width: 24px; padding: 3px; flex-shrink: 0; }
 button.gp-icon-button { padding: 2px 6px; height: 24px; background: transparent; box-shadow: none; border: 0; color: var(--text-muted); }
-button.gp-icon-button:hover { background: var(--background-modifier-hover); color: var(--text-normal); }
+button.gp-icon-button:not(:disabled):hover { background: var(--background-modifier-hover); color: var(--text-normal); }
+.gp-sc-header button.gp-icon-button:disabled { opacity: .3; background: transparent; color: var(--text-muted); cursor: default; pointer-events: none; }
 button.gp-sc-filter.is-active { color: var(--text-accent); background: var(--background-modifier-hover); }
 .gp-sc-repository { display: flex; align-items: center; gap: 6px; padding: 3px 8px; flex-shrink: 0; }
 .gp-sc-branch { display: flex; align-items: center; gap: 5px; color: var(--text-muted); min-width: 0; flex: 1; font-size: 11px; }

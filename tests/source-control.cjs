@@ -26,13 +26,16 @@ module.exports = async ({ window, js, check, capture }) => {
     const header = document.querySelector('.gp-sc-header'), button = header.querySelector('.gp-sc-workbench');
     const more = header.querySelector('.gp-sc-more');
     const filter = header.querySelector('.gp-sc-filter');
-    const orderCorrect = header.querySelector('.gp-sc-refresh').nextElementSibling === filter && filter.nextElementSibling === button && button.nextElementSibling === more && more === header.lastElementChild, label = button.getAttribute('aria-label');
+    const order = [...header.querySelectorAll('button')].map(control => control.className.match(/gp-sc-[\w-]+/)?.[0]);
+    const orderCorrect = order.join(',') === 'gp-sc-layout,gp-sc-collapse,gp-sc-expand,gp-sc-refresh,gp-sc-filter,gp-sc-workbench,gp-sc-more' && more === header.lastElementChild;
+    const treeActionsEnabled = !header.querySelector('.gp-sc-collapse').disabled && !header.querySelector('.gp-sc-expand').disabled;
+    const label = button.getAttribute('aria-label');
     const leaf = app.workspace.getLeavesOfType('git-workbench-workbench')[0];
     button.click(); await new Promise(r => setTimeout(r, 100)); button.click(); await new Promise(r => setTimeout(r, 100));
     const leaves = app.workspace.getLeavesOfType('git-workbench-workbench');
-    return { orderCorrect, label, count: leaves.length, reused: leaves[0] === leaf, active: app.workspace.activeLeaf === leaf };
+    return { orderCorrect, treeActionsEnabled, label, count: leaves.length, reused: leaves[0] === leaf, active: app.workspace.activeLeaf === leaf };
   }); console.log('Source control workbench action', opened);
-  check(opened.orderCorrect && opened.label === '打开 Git Workbench 工作台' && opened.count === 1 && opened.reused && opened.active, 'workbench action sits immediately before the rightmost overflow menu and reuses the existing tab');
+  check(opened.orderCorrect && opened.treeActionsEnabled && opened.label === '打开 Git Workbench 工作台' && opened.count === 1 && opened.reused && opened.active, 'source control toolbar order and tree actions are correct, and workbench reuses its existing tab');
   const collapse = await run(async () => {
     const folder = document.querySelector('[data-folder="笔记库/目录测试"][data-group="worktree"] .gp-sc-toggle');
     folder.click(); await new Promise(r => setTimeout(r, 50));
@@ -43,16 +46,30 @@ module.exports = async ({ window, js, check, capture }) => {
     document.querySelector('[data-folder="笔记库/目录测试"][data-group="worktree"] .gp-sc-toggle').click();
     return { absent, staged, persisted };
   }); check(collapse.absent && collapse.staged && collapse.persisted, 'folder collapse is independent per status group and survives refresh');
+  const toolbarFold = await run(async () => {
+    const collapse = document.querySelector('.gp-sc-collapse'), expand = document.querySelector('.gp-sc-expand');
+    const folder = () => document.querySelector('[data-folder="笔记库"][data-group="worktree"] .gp-sc-toggle');
+    collapse.click(); await new Promise(r => setTimeout(r, 50));
+    const folded = folder()?.getAttribute('aria-expanded') === 'false';
+    collapse.click(); await new Promise(r => setTimeout(r, 50));
+    const repeatedFold = folder()?.getAttribute('aria-expanded') === 'false';
+    expand.click(); await new Promise(r => setTimeout(r, 50));
+    const expanded = folder()?.getAttribute('aria-expanded') === 'true';
+    expand.click(); await new Promise(r => setTimeout(r, 50));
+    const repeatedExpand = folder()?.getAttribute('aria-expanded') === 'true';
+    return folded && repeatedFold && expanded && repeatedExpand;
+  }); check(toolbarFold, 'toolbar fold and expand actions run repeatedly without checking the current overall state');
   const preserved = await run(async () => {
     const input = document.querySelector('.gp-commit-input'); input.value = '未提交的消息'; input.dispatchEvent(new Event('input')); input.focus(); input.setSelectionRange(2, 4);
     document.querySelector('.gp-sc-layout').click(); await new Promise(r => setTimeout(r, 70));
-    return input === document.querySelector('.gp-commit-input') && input.value === '未提交的消息' && input.selectionStart === 2 && input.selectionEnd === 4 && document.querySelector('.gp-sc-list').dataset.layout === 'list' && !document.querySelector('.gp-sc-folder') && !!document.querySelector('.gp-sc-directory');
+    const disabled = document.querySelector('.gp-sc-collapse').disabled && document.querySelector('.gp-sc-expand').disabled;
+    return input === document.querySelector('.gp-commit-input') && input.value === '未提交的消息' && input.selectionStart === 2 && input.selectionEnd === 4 && document.querySelector('.gp-sc-list').dataset.layout === 'list' && !document.querySelector('.gp-sc-folder') && !!document.querySelector('.gp-sc-directory') && disabled;
   }); check(preserved, 'list toggle preserves composer node, draft and selection while showing filename plus directory');
   await capture('git-workbench-sidebar-list.png');
   const persisted = await run(async () => {
     const p = app.plugins.plugins['git-workbench']; await p.persistSettings(); await app.plugins.disablePlugin('git-workbench'); await app.plugins.enablePlugin('git-workbench');
     for (let i = 0; i < 80 && !document.querySelector('.gp-source-control'); i++) await new Promise(r => setTimeout(r, 30));
-    return app.plugins.plugins['git-workbench'].settings.sourceControlLayout === 'list' && document.querySelector('.gp-sc-list').dataset.layout === 'list';
+    return app.plugins.plugins['git-workbench'].settings.sourceControlLayout === 'list' && document.querySelector('.gp-sc-list').dataset.layout === 'list' && document.querySelector('.gp-sc-collapse').disabled && document.querySelector('.gp-sc-expand').disabled;
   }); check(persisted, 'source control layout choice survives plugin reload');
   await require('./source-file-menu.cjs')({ js, check, capture });
   await run(() => document.querySelector('.gp-sc-layout').click()); await settle();
