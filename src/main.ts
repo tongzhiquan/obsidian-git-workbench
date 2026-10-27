@@ -38,6 +38,7 @@ export default class GitWorkbench extends Plugin {
     if (this.settings.sourceControlLayout !== 'list') this.settings.sourceControlLayout = 'tree';
     this.settings.sourceControlVaultOnly = this.settings.sourceControlVaultOnly === true;
     this.settings.allowEditingStagedFiles = this.settings.allowEditingStagedFiles === true;
+    if (this.settings.stagingMode !== 'block') this.settings.stagingMode = 'line';
     if (!['openai', 'deepseek', 'custom'].includes(this.settings.aiProvider)) this.settings.aiProvider = DEFAULT_SETTINGS.aiProvider;
     this.settings.aiBaseUrl = typeof this.settings.aiBaseUrl === 'string' ? this.settings.aiBaseUrl : DEFAULT_SETTINGS.aiBaseUrl;
     this.settings.aiModel = typeof this.settings.aiModel === 'string' && this.settings.aiModel.trim() ? this.settings.aiModel : DEFAULT_SETTINGS.aiModel;

@@ -76,7 +76,18 @@ export function renderDiff(parent: HTMLElement, diff: FileDiff, plugin: GitWorkb
   const status = el(parent, 'div', 'gp-diff-edit-status'); status.setAttribute('role', 'status');
   let model = diff.lineActions ? lineEdits(diff.before.text, diff.after.text) : undefined;
   const actions = model && diff.stageable ? new DiffLineActions(model, diff.stageable, parent,
-    () => !model || saving || lineBusy || disposed || plugin.controller.busy || plugin.indexEdits.has(diff.path) || plugin.worktreeEdits.has(diff.path), invokeLines) : undefined;
+    () => !model || saving || lineBusy || disposed || plugin.controller.busy || plugin.indexEdits.has(diff.path) || plugin.worktreeEdits.has(diff.path), invokeLines, plugin.settings.stagingMode) : undefined;
+  const stagingMode = actions ? el(tools, 'div', 'gp-staging-mode') : undefined;
+  if (stagingMode) {
+    stagingMode.setAttribute('role', 'group'); stagingMode.setAttribute('aria-label', '暂存模式');
+    for (const [value, label, description] of [['line', '逐行', '逐行暂存'], ['block', '按块', '按修改块暂存']] as const) {
+      const control = button(stagingMode, label, async () => {
+        if (saving || lineBusy || plugin.controller.busy || plugin.settings.stagingMode === value) return;
+        plugin.settings.stagingMode = value; actions?.setMode(value); await plugin.persistSettings(); updateStatus();
+      }, 'gp-staging-option');
+      control.dataset.stagingMode = value; control.setAttribute('aria-label', description); setTooltip(control, description);
+    }
+  }
   async function invokeLines(action: LineAction, ids: number[]): Promise<void> {
     if (!model || !ids.length || disposed) return;
     if (saving || lineBusy || plugin.controller.busy) return;
@@ -132,6 +143,10 @@ export function renderDiff(parent: HTMLElement, diff: FileDiff, plugin: GitWorkb
     const edit = target ? plugin.edits(target).get(diff.path) : undefined;
     const dirty = !!edit;
     if (save) save.disabled = saving || !dirty;
+    if (stagingMode) for (const control of stagingMode.querySelectorAll<HTMLButtonElement>('[data-staging-mode]')) {
+      control.disabled = saving || lineBusy || plugin.controller.busy;
+      control.setAttribute('aria-pressed', String(control.dataset.stagingMode === plugin.settings.stagingMode));
+    }
     actions?.syncDisabled();
     const stale = !!edit && (target === 'index' ? edit.base.indexEntry !== diff.after.indexEntry : edit.base.exists !== diff.after.exists || edit.base.text !== diff.after.text || diff.after.binary || diff.after.large);
     parent.classList.toggle('is-modified', dirty);

@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { GitService } from '../src/git/service';
 import { RepositoryController } from '../src/controller';
-import { lineEdits, selectedText } from '../src/git/line-edits';
+import { lineBlocks, lineEdits, selectedText } from '../src/git/line-edits';
 import { DEFAULT_SETTINGS, EMPTY, HEAD, INDEX, WORKTREE } from '../src/types';
 
 test('line selections preserve replacements, adjacent insertions, removals and terminators', () => {
@@ -23,12 +23,55 @@ test('line selections preserve replacements, adjacent insertions, removals and t
   assert.throws(() => selectedText(model, [0, 0]), /有效/);
 });
 
+test('blocks group adjacent replacements and unequal insertions but stop at unchanged lines', () => {
+  const before = 'start\nold one\nold two\nseparator\nremove one\nremove two\nend';
+  const after = 'start\nNEW one\nNEW two\nextra\nseparator\nend';
+  const model = lineEdits(before, after)!, blocks = lineBlocks(model);
+  assert.deepEqual(blocks.map(block => [block.beforeIndex, block.afterIndex, block.beforeCount, block.afterCount, block.edits.map(edit => edit.id)]), [[1, 1, 2, 3, [0, 1, 2]], [4, 5, 2, 0, [3, 4]]]);
+  assert.equal(selectedText(model, blocks[0].edits.map(edit => edit.id)), 'start\nNEW one\nNEW two\nextra\nseparator\nremove one\nremove two\nend');
+  assert.equal(selectedText(model, blocks[1].edits.map(edit => edit.id), true), 'start\nNEW one\nNEW two\nextra\nseparator\nremove one\nremove two\nend');
+  assert.deepEqual(lineBlocks(lineEdits('same\n', 'same\n')!), []);
+});
+
+test('blocks retain empty-side anchors, CRLF, repeated lines and final-newline edits', () => {
+  for (const [before, after] of [['', 'one\r\ntwo'], ['one\r\ntwo', ''], ['a\nb\n', 'a\nb'], ['a\na\nb\na', 'A\na\nb\nA'], ['old\nextra\ntail', 'NEW\ntail']]) {
+    const model = lineEdits(before, after)!, blocks = lineBlocks(model), ids = blocks.flatMap(block => block.edits.map(edit => edit.id));
+    assert.deepEqual(ids, model.edits.map(edit => edit.id));
+    assert.equal(selectedText(model, ids), after);
+    assert.equal(selectedText(model, ids, true), before);
+    for (const block of blocks) assert.ok(block.beforeCount || block.afterCount);
+  }
+});
+
 async function fixture() {
   const root = await mkdtemp(join(tmpdir(), 'git-workbench-lines-'));
   const git = new GitService(root), run = (...args: string[]) => git.runner.text(args);
   await run('init', '--initial-branch=main'); await run('config', 'user.name', 'QA'); await run('config', 'user.email', 'qa@example.com'); await run('config', 'core.autocrlf', 'false'); await run('config', 'core.filemode', 'false'); await git.discover();
   return { root, git, run, close: async () => { git.dispose(); await rm(root, { recursive: true, force: true }); } };
 }
+test('block stage and unstage isolate nearby blocks even within one Git hunk', async () => {
+  const f = await fixture(), path = 'blocks.md';
+  const before = 'start\r\nold one\r\nold two\r\nseparator\r\nremove one\r\nremove two\r\nend';
+  const after = 'start\r\nNEW one\r\nNEW two\r\nextra\r\nseparator\r\nend';
+  try {
+    await writeFile(join(f.root, path), before); await f.git.stage([path]); await f.git.commit('blocks baseline');
+    await writeFile(join(f.root, 'other.md'), 'already staged'); await f.git.stage(['other.md']);
+    const other = (await f.git.file('other.md', INDEX)).indexEntry, head = (await f.git.status()).head;
+    await writeFile(join(f.root, path), after); const diff = await f.git.diff(path);
+    assert.equal(diff.hunks.length, 1);
+    const blocks = lineBlocks(lineEdits(before, after)!); assert.equal(blocks.length, 2);
+    const remaining = await f.git.applyLines(diff, blocks[0].edits.map(edit => edit.id));
+    assert.equal(remaining.before.text, 'start\r\nNEW one\r\nNEW two\r\nextra\r\nseparator\r\nremove one\r\nremove two\r\nend');
+    await assert.rejects(f.git.applyLines(diff, blocks[1].edits.map(edit => edit.id)), /已变化/);
+    const staged = await f.git.diff(path, HEAD, INDEX), stagedBlock = lineBlocks(lineEdits(staged.before.text, staged.after.text)!)[0];
+    await f.git.applyLines(staged, stagedBlock.edits.map(edit => edit.id));
+    assert.equal((await f.git.file(path, INDEX)).text, before);
+    assert.equal((await f.git.file('other.md', INDEX)).indexEntry, other);
+    assert.equal(await readFile(join(f.root, path), 'utf8'), after);
+    assert.equal((await f.git.status()).head, head);
+  } finally { await f.close(); }
+});
+
 test('stage and unstage individual adjacent changes preserve other index entries, mode, worktree and HEAD', async () => {
   const f = await fixture(); const path = '中文 $ [x].md', before = 'one\r\ntwo\r\nthree\r\nfour';
   try {

@@ -86,6 +86,12 @@ button.gp-file-link:hover { color: var(--interactive-accent); background: var(--
 .gp-line-action-row { height: 25px; display: flex; align-items: center; justify-content: flex-start; }
 .gp-line-actions .gp-line-action { width: 25px; height: 24px; padding: 3px; display: inline-flex; align-items: center; justify-content: center; background: transparent; border: 0; box-shadow: none; color: var(--interactive-accent); opacity: .35; }
 .gp-line-actions .gp-line-restore { color: var(--text-error); }
+.gp-line-actions .gp-block-restore { color: var(--text-error); }
+.gp-line-actions [data-block-edits] { opacity: .75; }
+.gp-staging-mode { display: inline-flex; align-items: center; border: 1px solid var(--background-modifier-border); border-radius: 4px; overflow: hidden; }
+.gp-staging-option { min-height: 26px; padding: 3px 7px !important; border: 0 !important; border-radius: 0 !important; box-shadow: none !important; background: transparent; font-size: 11px; white-space: nowrap; }
+.gp-staging-option + .gp-staging-option { border-left: 1px solid var(--background-modifier-border) !important; }
+.gp-staging-option[aria-pressed="true"] { color: var(--interactive-accent); background: var(--background-modifier-hover); }
 .gp-line-actions:hover .gp-line-action, .gp-line-actions:focus-within .gp-line-action, .gp-line-action-row.is-selected .gp-line-action { opacity: 1; }
 .gp-line-actions .gp-line-action svg { width: 14px; height: 14px; }
 .gp-line-actions .gp-line-action:hover, .gp-line-action-row.is-selected { background: var(--background-modifier-hover); }

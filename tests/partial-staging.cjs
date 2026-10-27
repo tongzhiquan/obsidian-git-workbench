@@ -14,6 +14,26 @@ module.exports = async ({ js, check, capture }) => {
   console.log('Split line actions', count);
   check(count.stage === 5 && count.restore === 5, 'split gutters expose individual replacement, insertion and deletion actions including empty-side spacers');
   await capture('git-workbench-line-actions-split.png');
+  await run(() => document.querySelector('.gp-staging-option[data-staging-mode="block"]').click());
+  await wait(() => document.querySelectorAll('.gp-block-stage').length === 2);
+  const blockControls = await run(() => [...document.querySelectorAll('.gp-block-stage')].map(control => control.dataset.blockEdits.split(',').length));
+  check(blockControls[0] === 3 && blockControls[1] === 2 && await run(async () => (await app.plugins.plugins['git-workbench'].loadData()).settings.stagingMode === 'block'), 'staging mode persists and groups adjacent replacements, insertions and deletions into two actions');
+  await run(() => document.querySelector('.gp-block-stage').click());
+  await wait(() => !app.plugins.plugins['git-workbench'].controller.busy && document.querySelectorAll('.gp-block-stage').length === 1);
+  check(await run(async () => {
+    const p = app.plugins.plugins['git-workbench'];
+    return (await p.git.file('笔记库/逐行测试.md', { kind: 'index' })).text === '# lines\nA\nB\nextra\nmiddle\nremove one\nremove two\nend\n' && (await p.git.file('笔记库/逐行测试.md', { kind: 'worktree' })).text === '# lines\nA\nB\nextra\nmiddle\nend\n';
+  }), 'staging one block leaves the other block and working file unchanged');
+  await run(async () => app.plugins.plugins['git-workbench'].openDiff('笔记库/逐行测试.md', { kind: 'commit', ref: 'HEAD' }, { kind: 'index' }));
+  await wait(() => !!document.querySelector('.gp-block-unstage'));
+  await run(() => document.querySelector('.gp-block-unstage').click());
+  await wait(async () => !app.plugins.plugins['git-workbench'].controller.busy && !(await app.plugins.plugins['git-workbench'].git.file('笔记库/逐行测试.md', { kind: 'index' })).text.includes('\nA\n'));
+  await run(async () => {
+    const p = app.plugins.plugins['git-workbench']; p.settings.stagingMode = 'line'; await p.persistSettings();
+    await p.openDiff('笔记库/逐行测试.md', { kind: 'index' }, { kind: 'worktree' });
+  });
+  await wait(() => document.querySelectorAll('.gp-line-stage').length === 5);
+  check(await run(async () => (await app.plugins.plugins['git-workbench'].git.file('笔记库/逐行测试.md', { kind: 'index' })).text === '# lines\na\nb\nmiddle\nremove one\nremove two\nend\n'), 'cancel-staging a whole block restores the original index snapshot');
   await wait(() => {
     const node = document.querySelector('.cm-merge-b'); if (!node) return false;
     const v = require('@codemirror/view').EditorView.findFromDOM(node);

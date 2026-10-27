@@ -14,6 +14,7 @@ export interface GitRef { name: string; fullName: string; hash: string; type: 'b
 export interface ChangedFile { path: string; oldPath?: string; status: string }
 export interface FileContent { text: string; size: number; binary: boolean; large: boolean; exists: boolean; indexEntry?: string; mode?: string }
 export type EditTarget = 'index' | 'worktree';
+export type StagingMode = 'line' | 'block';
 export interface PendingEdit { text: string; base: FileContent }
 export interface DiffHunk { header: string; lines: string[]; patch: string; index: number }
 export interface FileDiff { path: string; oldPath: string; left: Revision; right: Revision; before: FileContent; after: FileContent; patch: string; hunks: DiffHunk[]; stageable: 'stage' | 'unstage' | null; lineActions?: boolean }
@@ -26,6 +27,7 @@ export interface Stash { ref: string; hash: string; subject: string }
 export interface Settings {
   version: 1; gitPath: string; inlineBlame: boolean; fullBlame: boolean; gutter: boolean;
   diffMode: 'split' | 'unified'; pageSize: number; autoBackup: boolean; autoCommit: boolean; autoSync: boolean;
+  stagingMode: StagingMode;
   pullOnStartup: boolean; intervalMinutes: number; commitTemplate: string;
   sourceControlLayout: 'tree' | 'list';
   sourceControlVaultOnly: boolean;
@@ -40,6 +42,7 @@ export interface Settings {
 export const DEFAULT_SETTINGS: Settings = {
   version: 1, gitPath: 'git', inlineBlame: true, fullBlame: false, gutter: true,
   diffMode: 'split', pageSize: 200, autoBackup: false, autoCommit: false, autoSync: false,
+  stagingMode: 'line',
   pullOnStartup: false, intervalMinutes: 10, commitTemplate: 'vault backup: {{date}}',
   sourceControlLayout: 'tree',
   sourceControlVaultOnly: false,

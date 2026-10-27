@@ -8,6 +8,23 @@ export interface LineEdit {
   after?: string;
 }
 export interface LineEdits { before: string[]; after: string[]; edits: LineEdit[] }
+export interface LineBlock { edits: LineEdit[]; beforeIndex: number; afterIndex: number; beforeCount: number; afterCount: number }
+
+// A block ends at an unchanged logical line, independently of patch context.
+export function lineBlocks(model: LineEdits): LineBlock[] {
+  const blocks: LineBlock[] = [];
+  for (const edit of model.edits) {
+    let block = blocks[blocks.length - 1];
+    if (!block || edit.beforeIndex !== block.beforeIndex + block.beforeCount || edit.afterIndex !== block.afterIndex + block.afterCount) {
+      block = { edits: [], beforeIndex: edit.beforeIndex, afterIndex: edit.afterIndex, beforeCount: 0, afterCount: 0 };
+      blocks.push(block);
+    }
+    block.edits.push(edit);
+    if (edit.before !== undefined) block.beforeCount++;
+    if (edit.after !== undefined) block.afterCount++;
+  }
+  return blocks;
+}
 const lines = (text: string): string[] => text.match(/[^\n]*\n|[^\n]+$/g) ?? [];
 const normal = (line: string): string => line.replace(/\r\n$/, '\n');
 

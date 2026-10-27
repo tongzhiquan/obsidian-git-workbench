@@ -2,27 +2,29 @@ import { Prec, StateEffect, type Extension } from '@codemirror/state';
 import { EditorView, GutterMarker, gutter, lineNumbers } from '@codemirror/view';
 import { getChunks, getOriginalDoc } from '@codemirror/merge';
 import { Menu, setIcon, setTooltip } from 'obsidian';
-import type { LineEdit, LineEdits } from '../git/line-edits';
+import { lineBlocks, type LineBlock, type LineEdit, type LineEdits } from '../git/line-edits';
+import type { StagingMode } from '../types';
 import { button, el } from './common';
 
 export type LineAction = 'stage' | 'unstage' | 'restore';
 const refreshActions = StateEffect.define<void>();
 type Side = 'left' | 'right';
-interface Row { edit?: LineEdit; actions: LineAction[] }
+interface Row { edit?: LineEdit; actions: LineAction[]; ids?: number[] }
 
 class ActionsMarker extends GutterMarker {
   constructor(private owner: DiffLineActions, private rows: Row[], private disabled: boolean, private selected: string) { super(); }
   eq(other: GutterMarker): boolean { return other instanceof ActionsMarker && this.disabled === other.disabled && this.selected === other.selected && JSON.stringify(this.rows) === JSON.stringify(other.rows); }
   toDOM(): HTMLElement {
     const group = document.createElement('div'); group.className = 'gp-line-action-group';
-    for (const { edit, actions } of this.rows) {
+    for (const { edit, actions, ids } of this.rows) {
       const row = el(group, 'div', 'gp-line-action-row');
       if (edit) {
         row.classList.toggle('is-selected', this.owner.selected.has(edit.id));
         for (const action of actions) {
-          const label = action === 'stage' ? '暂存此处修改' : action === 'restore' ? '还原此处修改' : '取消暂存此处修改';
-          const control = button(row, '', () => this.owner.invoke(action, [edit.id]), `gp-line-action gp-line-${action}`);
+          const label = ids ? (action === 'stage' ? '暂存此修改块' : action === 'restore' ? '还原此修改块' : '取消暂存此修改块') : (action === 'stage' ? '暂存此处修改' : action === 'restore' ? '还原此处修改' : '取消暂存此处修改');
+          const control = button(row, '', () => this.owner.invoke(action, ids ?? [edit.id]), 'gp-line-action gp-' + (ids ? 'block' : 'line') + '-' + action);
           control.dataset.lineEdit = String(edit.id); control.dataset.beforeLine = String(edit.beforeIndex + 1); control.dataset.afterLine = String(edit.afterIndex + 1);
+          if (ids) control.dataset.blockEdits = ids.join(',');
           setIcon(control, action === 'stage' ? 'plus' : action === 'restore' ? 'rotate-ccw' : 'minus'); setTooltip(control, label);
           control.disabled = this.disabled;
         }
@@ -39,8 +41,19 @@ export class DiffLineActions {
   private last?: number;
   private disabled: boolean;
   private alive = true;
-  constructor(private model: LineEdits, private stageable: 'stage' | 'unstage', parent: HTMLElement, private blocked: () => boolean, public invoke: (action: LineAction, ids: number[]) => unknown) {
+  private blocks: LineBlock[];
+  constructor(private model: LineEdits, private stageable: 'stage' | 'unstage', parent: HTMLElement, private blocked: () => boolean, public invoke: (action: LineAction, ids: number[]) => unknown, private mode: StagingMode = 'line') {
+    this.blocks = lineBlocks(model);
     this.bar = el(parent, 'div', 'gp-line-selection'); this.bar.hidden = true; this.disabled = blocked();
+  }
+  setMode(mode: StagingMode): void {
+    if (this.mode === mode) return;
+    this.mode = mode; this.selected.clear(); this.last = undefined; this.refresh();
+  }
+  private blockRow(block: LineBlock, side: Side, unified: boolean): Row {
+    const actions: LineAction[] = this.stageable === 'unstage' ? (side === 'left' || unified ? ['unstage'] : [])
+      : unified ? ['restore', 'stage'] : [side === 'left' ? 'restore' : 'stage'];
+    return { edit: block.edits[0], ids: block.edits.map(edit => edit.id), actions };
   }
   private marker(rows: Row[]): GutterMarker | null {
     return rows.some(row => row.edit && row.actions.length) ? new ActionsMarker(this, rows, this.disabled, [...this.selected].join(',')) : null;
@@ -56,6 +69,7 @@ export class DiffLineActions {
       lineMarker: (view, line) => {
         this.views.add(view);
         const index = view.state.doc.lineAt(line.from).number - 1;
+        if (this.mode === 'block') return this.marker(this.blocks.filter(block => side === 'left' ? block.beforeCount > 0 && block.beforeIndex === index : block.afterCount > 0 && block.afterIndex === index).map(block => this.blockRow(block, side, unified)));
         const edits = this.model.edits.filter(edit => side === 'left' ? edit.before !== undefined && edit.beforeIndex === index : edit.after !== undefined && edit.afterIndex === index);
         return this.marker(edits.map(edit => ({ edit, actions: this.operations(edit, side, unified) })));
       },
@@ -67,16 +81,22 @@ export class DiffLineActions {
           const original = getOriginalDoc(view.state), first = original.lineAt(chunk.fromA).number - 1;
           const last = original.lineAt(Math.max(chunk.fromA, chunk.endA)).number - 1;
           return this.marker(Array.from({ length: last - first + 1 }, (_, i) => {
+            if (this.mode === 'block') {
+              const block = this.blocks.find(block => block.beforeIndex === first + i && block.afterCount === 0);
+              return block ? this.blockRow(block, 'left', true) : { actions: [] };
+            }
             const edit = this.model.edits.find(edit => edit.before !== undefined && edit.beforeIndex === first + i);
             return { edit, actions: edit ? this.operations(edit, 'left', true, true) : [] };
           }));
         }
         const index = view.state.doc.lineAt(block.from).number - 1;
+        if (this.mode === 'block') return this.marker(this.blocks.filter(part => side === 'left' ? part.beforeCount === 0 && (part.beforeIndex === index || block.from === view.state.doc.length && part.beforeIndex === index + 1) : part.afterCount === 0 && (part.afterIndex === index || block.from === view.state.doc.length && part.afterIndex === index + 1)).map(part => this.blockRow(part, side, false)));
         const edits = this.model.edits.filter(edit => side === 'left' ? edit.before === undefined && (edit.beforeIndex === index || block.from === view.state.doc.length && edit.beforeIndex === index + 1) : edit.after === undefined && (edit.afterIndex === index || block.from === view.state.doc.length && edit.afterIndex === index + 1));
         return this.marker(edits.map(edit => ({ edit, actions: this.operations(edit, side, false) })));
       },
       lineMarkerChange: update => update.docChanged || update.transactions.some(tr => tr.effects.some(effect => effect.is(refreshActions))),
     })), lineNumbers({ domEventHandlers: { mousedown: (view, line, event) => {
+      if (this.mode === 'block') return false;
       const index = view.state.doc.lineAt(line.from).number - 1;
       const edit = this.model.edits.find(edit => side === 'left' ? edit.before !== undefined && edit.beforeIndex === index : edit.after !== undefined && edit.afterIndex === index);
       if (!edit || this.blocked()) return false;
@@ -88,13 +108,13 @@ export class DiffLineActions {
       this.views.add(update.view);
       if (!update.selectionSet || update.docChanged) return;
       queueMicrotask(() => {
-        if (!this.alive || this.blocked()) return;
+        if (!this.alive || this.mode === 'block' || this.blocked()) return;
         const selected = this.fromSelection(update.view, side);
         if (selected.size) { this.selected.clear(); selected.forEach(id => this.selected.add(id)); this.refresh(); }
       });
     }), EditorView.domEventHandlers({
       mouseup: (_event, view) => {
-        if (!unified || this.blocked()) return false;
+        if (this.mode === 'block' || !unified || this.blocked()) return false;
         const native = view.dom.ownerDocument.getSelection(); if (!native || native.isCollapsed || !native.rangeCount) return false;
         const range = native.getRangeAt(0), selected = this.fromSelection(view, side), original = getOriginalDoc(view.state);
         for (const dom of view.dom.querySelectorAll('.cm-deletedChunk')) {
@@ -132,6 +152,7 @@ export class DiffLineActions {
   syncDisabled(): void { const next = this.blocked(); if (this.disabled !== next) { this.disabled = next; this.refresh(); } }
   replaceModel(model?: LineEdits): void {
     this.model = model ?? { before: [], after: [], edits: [] }; this.selected.clear(); this.last = undefined;
+    this.blocks = lineBlocks(this.model);
     this.disabled = this.blocked(); this.refresh();
   }
   private refresh(): void {
