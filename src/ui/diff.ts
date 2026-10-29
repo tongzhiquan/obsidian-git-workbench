@@ -53,7 +53,7 @@ export function renderDiff(parent: HTMLElement, diff: FileDiff, plugin: GitWorkb
   const canEdit = () => !!target && !base.binary && !base.large && !mixedEol() && (target === 'worktree' || base.exists && /^100(644|755) [a-f0-9]+ 0\t/.test(base.indexEntry ?? '') && !base.indexEntry!.includes('\0'))
     && (target === 'worktree' || plugin.settings.allowEditingStagedFiles);
   let editable = canEdit(), saving = false, lineBusy = false, syncing = false, disposed = false, merge: MergeView | undefined, right: EditorView | undefined;
-  let current = -1, rightColumn: HTMLElement | undefined;
+  let current = -1, rightColumn: HTMLElement | undefined, navigationView: EditorView | undefined;
   const unified = new Compartment(), editability = new Compartment(), editing = new Compartment();
   const fileAction = diff.stageable ?? (diff.left.kind === 'empty' && diff.right.kind === 'worktree' ? 'stage' : null);
   if (fileAction) button(bar, fileAction === 'stage' ? '暂存文件' : '取消暂存', () => {
@@ -179,23 +179,30 @@ export function renderDiff(parent: HTMLElement, diff: FileDiff, plugin: GitWorkb
   }
   function navigate(direction: number): void {
     if (!right) return; const chunks = getChunks(right.state)?.chunks ?? []; if (!chunks.length) return;
-    const anchor = right.state.selection.main.head;
-    current = direction > 0 ? chunks.findIndex(chunk => chunk.fromB > anchor) : -1;
-    if (direction < 0) chunks.forEach((chunk, index) => { if (chunk.fromB < anchor) current = index; });
+    const view = navigationView ?? right, isLeft = view === merge?.a;
+    const anchor = view.state.selection.main.head;
+    const start = (chunk: typeof chunks[number]) => isLeft ? chunk.fromA : chunk.fromB;
+    current = direction > 0 ? chunks.findIndex(chunk => start(chunk) > anchor) : -1;
+    if (direction < 0) chunks.forEach((chunk, index) => { if (start(chunk) < anchor) current = index; });
     if (current < 0) current = direction > 0 ? 0 : chunks.length - 1;
-    const chunk = chunks[current], position = Math.min(chunk.fromB, right.state.doc.length);
-    right.dispatch({ selection: { anchor: position }, effects: EditorView.scrollIntoView(position, { y: 'center' }) });
-    if (merge) merge.a.dispatch({ effects: EditorView.scrollIntoView(Math.min(chunk.fromA, merge.a.state.doc.length), { y: 'center' }) });
-    right.focus(); updateStatus();
+    const chunk = chunks[current], position = Math.min(start(chunk), view.state.doc.length);
+    view.dispatch({ selection: { anchor: position }, effects: EditorView.scrollIntoView(position, { y: 'center' }) });
+    const other = merge && (isLeft ? merge.b : merge.a);
+    if (other) other.dispatch({ effects: EditorView.scrollIntoView(Math.min(isLeft ? chunk.fromB : chunk.fromA, other.state.doc.length), { y: 'center' }) });
+    view.focus(); updateStatus();
   }
   const shared: Extension[] = [EditorState.tabSize.of(4), keymap.of(defaultKeymap), EditorView.editable.of(true),
     EditorState.phrases.of({ '$ unchanged lines': '展开 $ 行未修改内容' }),
     EditorView.contentAttributes.compute([EditorState.readOnly], state => ({ 'aria-readonly': String(state.readOnly), 'tabindex': '0', 'spellcheck': 'false' })),
-    EditorView.domEventHandlers({ copy: (event, view) => {
-      const text = comparisonSelection(view);
-      if (!text || !event.clipboardData) return false;
-      event.clipboardData.setData('text/plain', text); event.preventDefault(); return true;
-    } }),
+    EditorView.domEventHandlers({
+      focus: (_event, view) => { navigationView = view; return false; },
+      mousedown: (_event, view) => { navigationView = view; return false; },
+      copy: (event, view) => {
+        const text = comparisonSelection(view);
+        if (!text || !event.clipboardData) return false;
+        event.clipboardData.setData('text/plain', text); event.preventDefault(); return true;
+      },
+    }),
   ];
   const eol = base.text.includes('\r\n') ? '\r\n' : '\n';
   function editingExtensions(): Extension {

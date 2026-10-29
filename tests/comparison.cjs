@@ -59,6 +59,26 @@ module.exports = async ({ window, js, check, capture }) => {
     return { first, second, back: get().state.selection.main.head, label: document.querySelector('.gp-diff-count').textContent };
   });
   check(navigation.second > navigation.first && navigation.back === navigation.first && navigation.label.includes('1 / 2'), 'previous and next navigate separate changes and show current change count');
+  const cursorNavigation = await run(async () => {
+    const api = require('@codemirror/view').EditorView;
+    const left = api.findFromDOM(document.querySelector('.cm-merge-a')), right = api.findFromDOM(document.querySelector('.cm-merge-b'));
+    const results = [];
+    for (const [side, view, other] of [['left', left, right], ['right', right, left]]) {
+      for (const [label, expected] of [['下一处修改', 80], ['上一处修改', 20]]) {
+        other.dispatch({ selection: { anchor: other.state.doc.line(1).from } });
+        view.dispatch({ selection: { anchor: view.state.doc.line(50).from + 3 } }); view.focus();
+        const control = document.querySelector(`[aria-label="${label}"]`);
+        control.focus(); control.click(); await new Promise(r => setTimeout(r, 50));
+        results.push({ side, label, expected, line: view.state.doc.lineAt(view.state.selection.main.head).number, focused: view.hasFocus });
+      }
+    }
+    // A new caret position overrides the previous navigation result.
+    left.dispatch({ selection: { anchor: left.state.doc.line(90).from } }); left.focus();
+    document.querySelector('[aria-label="上一处修改"]').click(); await new Promise(r => setTimeout(r, 50));
+    results.push({ expected: 80, line: left.state.doc.lineAt(left.state.selection.main.head).number, focused: left.hasFocus });
+    return results;
+  });
+  check(cursorNavigation.every(result => result.line === result.expected && result.focused), 'split navigation starts from the current caret in either pane, survives toolbar focus and keeps focus on that pane');
   await run(() => document.querySelector('[aria-label="折叠未修改区域"]').click());
   await wait(() => document.querySelectorAll('.cm-collapsedLines').length >= 2);
   check(await run(() => document.querySelector('.cm-collapsedLines').textContent.includes('未修改内容')), 'unchanged context folds into localized expandable sections');
@@ -108,6 +128,18 @@ module.exports = async ({ window, js, check, capture }) => {
   });
   await wait(() => !!document.querySelector('.gp-merge-body .cm-deletedChunk'));
   check(await run(() => !!document.querySelector('.gp-merge-body .cm-deletedChunk') && document.querySelector('.gp-merge-body .cm-content').contentEditable === 'true' && !document.querySelector('.cm-chunkButtons')), 'unified diff is editable without accept or reject chunk buttons');
+  const unifiedNavigation = await run(async () => {
+    const view = require('@codemirror/view').EditorView.findFromDOM(document.querySelector('.gp-merge-body .cm-editor'));
+    const results = [];
+    for (const [label, expected] of [['下一处修改', 80], ['上一处修改', 20]]) {
+      view.dispatch({ selection: { anchor: view.state.doc.line(50).from + 3 } }); view.focus();
+      const control = document.querySelector(`[aria-label="${label}"]`);
+      control.focus(); control.click(); await new Promise(r => setTimeout(r, 50));
+      results.push({ expected, line: view.state.doc.lineAt(view.state.selection.main.head).number, focused: view.hasFocus });
+    }
+    return results;
+  });
+  check(unifiedNavigation.every(result => result.line === result.expected && result.focused), 'unified navigation searches before and after a manually moved caret instead of reusing the last change');
   await run(async () => {
     const view = require('@codemirror/view').EditorView.findFromDOM(document.querySelector('.gp-merge-body .cm-editor'));
     const line = view.state.doc.line(80); view.dispatch({ changes: { from: line.from, to: line.to, insert: '第 80 行：统一模式编辑' } });

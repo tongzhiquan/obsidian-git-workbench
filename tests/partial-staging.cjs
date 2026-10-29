@@ -18,6 +18,22 @@ module.exports = async ({ js, check, capture }) => {
   await wait(() => document.querySelectorAll('.gp-block-stage').length === 2);
   const blockControls = await run(() => [...document.querySelectorAll('.gp-block-stage')].map(control => control.dataset.blockEdits.split(',').length));
   check(blockControls[0] === 3 && blockControls[1] === 2 && await run(async () => (await app.plugins.plugins['git-workbench'].loadData()).settings.stagingMode === 'block'), 'staging mode persists and groups adjacent replacements, insertions and deletions into two actions');
+  const blockVisual = await run(() => {
+    const badges = [...document.querySelectorAll('.gp-block-badge')].map(node => node.textContent);
+    const first = document.querySelector('.gp-block-stage');
+    return {badges, aria: first?.getAttribute('aria-label'), left: document.querySelectorAll('.cm-merge-a .cm-line.gp-block-range').length, right: document.querySelectorAll('.cm-merge-b .cm-line.gp-block-range').length, lines: [...document.querySelectorAll('.gp-merge-body .cm-editor')].map(editor => ({classes: editor.className, blocks: [...editor.querySelectorAll('.cm-line')].filter(line => line.classList.contains('gp-block-range')).map(line => line.textContent)}))};
+  });
+  check(blockVisual.badges.includes('块1') && blockVisual.badges.includes('块2') && blockVisual.aria?.includes('左侧第 2 至 3 行 → 右侧第 2 至 4 行') && blockVisual.left === 4 && blockVisual.right === 3, 'split view shows numbered block badges, explicit old/new line ranges and outlined rows on both sides');
+  await capture('git-workbench-block-ranges.png');
+  await run(() => { const control = document.querySelector('.gp-block-stage'); control.dispatchEvent(new PointerEvent('pointerenter', { bubbles: false })); });
+  await wait(() => document.querySelectorAll('.cm-merge-a .cm-line.gp-block-range-hover').length === 2 && document.querySelectorAll('.cm-merge-b .cm-line.gp-block-range-hover').length === 3);
+  await capture('git-workbench-block-ranges-hover.png');
+  await run(() => { const control = document.querySelector('.gp-block-stage'); control.dispatchEvent(new PointerEvent('pointerleave', { bubbles: false })); });
+  await wait(() => !document.querySelector('.cm-line.gp-block-range-hover'));
+  await run(() => document.querySelector('.gp-block-stage').focus());
+  await wait(() => document.querySelectorAll('.cm-merge-a .cm-line.gp-block-range-hover').length === 2 && document.querySelectorAll('.cm-merge-b .cm-line.gp-block-range-hover').length === 3);
+  await run(() => document.querySelector('.gp-block-stage').blur());
+  await wait(() => !document.querySelector('.cm-line.gp-block-range-hover'));
   await run(() => document.querySelector('.gp-block-stage').click());
   await wait(() => !app.plugins.plugins['git-workbench'].controller.busy && document.querySelectorAll('.gp-block-stage').length === 1);
   check(await run(async () => {
@@ -59,7 +75,17 @@ module.exports = async ({ js, check, capture }) => {
     const p = app.plugins.plugins['git-workbench'];
     return (await p.git.file('笔记库/逐行测试.md', { kind: 'worktree' })).text === '# lines\nA\nB\nmiddle\nend\n' && (await p.git.file('笔记库/逐行测试.md', { kind: 'index' })).text === '# lines\nA\nB\nmiddle\nremove two\nend\n';
   }), 'left-side restore reverts only the insertion in the worktree and preserves staged content');
-  await run(async () => { const p = app.plugins.plugins['git-workbench']; p.settings.diffMode = 'unified'; await p.openDiff('笔记库/逐行测试.md', { kind: 'index' }, { kind: 'worktree' }); });
+  await run(async () => { const p = app.plugins.plugins['git-workbench']; p.settings.stagingMode = 'block'; await p.persistSettings(); p.settings.diffMode = 'unified'; await p.openDiff('笔记库/逐行测试.md', { kind: 'index' }, { kind: 'worktree' }); });
+  await wait(() => !!document.querySelector('.cm-deletedChunk .cm-deletedLine.gp-block-range') && !!document.querySelector('.gp-block-stage'));
+  const unifiedVisual = await run(() => ({deleted: [...document.querySelectorAll('.cm-deletedChunk .cm-deletedLine')].map(node => ({text: node.textContent, classes: node.className, blockId: node.dataset.gpBlockId})), control: [...document.querySelectorAll('.gp-block-stage')].map(node => node.getAttribute('aria-label'))}));
+  check(unifiedVisual.deleted.length === 1 && unifiedVisual.deleted[0].classes.includes('gp-block-range') && unifiedVisual.control.some(label => label.includes('左侧第 5 至 5 行 → 右侧无修改行')), 'unified view outlines each deleted line and exposes its original-line range');
+  await capture('git-workbench-block-ranges-unified.png');
+  await run(() => document.querySelector('.gp-block-stage').dispatchEvent(new PointerEvent('pointerenter')));
+  await wait(() => !!document.querySelector('.cm-deletedLine.gp-block-range-hover'));
+  await capture('git-workbench-block-ranges-unified-hover.png');
+  await run(() => document.querySelector('.gp-block-stage').dispatchEvent(new PointerEvent('pointerleave')));
+  await wait(() => !document.querySelector('.cm-deletedLine.gp-block-range-hover'));
+  await run(async () => { const p = app.plugins.plugins['git-workbench']; p.settings.stagingMode = 'line'; await p.persistSettings(); await p.openDiff('笔记库/逐行测试.md', { kind: 'index' }, { kind: 'worktree' }); });
   await wait(() => !!document.querySelector('.cm-deletedChunk') && !!document.querySelector('.gp-line-stage'));
   check(await run(() => document.querySelectorAll('.gp-line-stage').length === 1 && document.querySelectorAll('.gp-line-restore').length === 1), 'unified deleted-line gutter provides stage and restore without replacing copyable deleted text');
   await capture('git-workbench-line-actions-unified.png');
