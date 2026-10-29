@@ -7,7 +7,7 @@ module.exports = async ({ js, check, capture }) => {
     await app.vault.create('逐行测试.md', '# lines\na\nb\nmiddle\nremove one\nremove two\nend\n');
     await p.git.stage(['笔记库/逐行测试.md']); await p.git.commit('QA 逐行基准');
     await app.vault.modify(app.vault.getAbstractFileByPath('逐行测试.md'), '# lines\nA\nB\nextra\nmiddle\nend\n');
-    p.settings.diffMode = 'split'; await p.controller.refresh(); await p.openDiff('笔记库/逐行测试.md', { kind: 'index' }, { kind: 'worktree' });
+    p.settings.diffMode = 'split'; p.settings.stagingMode = 'line'; await p.controller.refresh(); await p.openDiff('笔记库/逐行测试.md', { kind: 'index' }, { kind: 'worktree' });
   });
   await wait(() => !!document.querySelector('.gp-line-stage'));
   const count = await run(() => ({ stage: document.querySelectorAll('.gp-line-stage').length, restore: document.querySelectorAll('.gp-line-restore').length }));
@@ -19,21 +19,56 @@ module.exports = async ({ js, check, capture }) => {
   const blockControls = await run(() => [...document.querySelectorAll('.gp-block-stage')].map(control => control.dataset.blockEdits.split(',').length));
   check(blockControls[0] === 3 && blockControls[1] === 2 && await run(async () => (await app.plugins.plugins['git-workbench'].loadData()).settings.stagingMode === 'block'), 'staging mode persists and groups adjacent replacements, insertions and deletions into two actions');
   const blockVisual = await run(() => {
-    const badges = [...document.querySelectorAll('.gp-block-badge')].map(node => node.textContent);
     const first = document.querySelector('.gp-block-stage');
-    return {badges, aria: first?.getAttribute('aria-label'), left: document.querySelectorAll('.cm-merge-a .cm-line.gp-block-range').length, right: document.querySelectorAll('.cm-merge-b .cm-line.gp-block-range').length, lines: [...document.querySelectorAll('.gp-merge-body .cm-editor')].map(editor => ({classes: editor.className, blocks: [...editor.querySelectorAll('.cm-line')].filter(line => line.classList.contains('gp-block-range')).map(line => line.textContent)}))};
+    const rows = [...document.querySelectorAll('.gp-block-boundary')];
+    const brackets = rows.every(row => {
+      const style = getComputedStyle(row, '::before');
+      return style.borderLeftWidth === '1px' && style.borderRightWidth === '0px'
+        && (style.borderTopWidth === '1px') === (row.classList.contains('gp-block-start') || row.classList.contains('gp-block-single'))
+        && (style.borderBottomWidth === '1px') === (row.classList.contains('gp-block-end') || row.classList.contains('gp-block-single'));
+    });
+    const plain = [...document.querySelectorAll('.cm-line.gp-block-range')].every(line => getComputedStyle(line).boxShadow === 'none' && getComputedStyle(line).backgroundImage === 'none');
+    window.__qaBracketTheme = document.body.classList.contains('theme-dark') ? 'dark' : 'light';
+    return {badges: document.querySelectorAll('.gp-block-badge').length, aria: first?.getAttribute('aria-label'), left: document.querySelectorAll('.cm-merge-a .cm-line.gp-block-range').length, right: document.querySelectorAll('.cm-merge-b .cm-line.gp-block-range').length, rows: rows.length, brackets, plain};
   });
-  check(blockVisual.badges.includes('块1') && blockVisual.badges.includes('块2') && blockVisual.aria?.includes('左侧第 2 至 3 行 → 右侧第 2 至 4 行') && blockVisual.left === 4 && blockVisual.right === 3, 'split view shows numbered block badges, explicit old/new line ranges and outlined rows on both sides');
-  await capture('git-workbench-block-ranges.png');
-  await run(() => { const control = document.querySelector('.gp-block-stage'); control.dispatchEvent(new PointerEvent('pointerenter', { bubbles: false })); });
-  await wait(() => document.querySelectorAll('.cm-merge-a .cm-line.gp-block-range-hover').length === 2 && document.querySelectorAll('.cm-merge-b .cm-line.gp-block-range-hover').length === 3);
-  await capture('git-workbench-block-ranges-hover.png');
-  await run(() => { const control = document.querySelector('.gp-block-stage'); control.dispatchEvent(new PointerEvent('pointerleave', { bubbles: false })); });
-  await wait(() => !document.querySelector('.cm-line.gp-block-range-hover'));
+  check(blockVisual.badges === 0 && blockVisual.aria?.includes('左侧第 2 至 3 行 → 右侧第 2 至 4 行') && blockVisual.left === 4 && blockVisual.right === 3 && blockVisual.rows === 8 && blockVisual.brackets && blockVisual.plain, 'split block ranges use gutter brackets with start/end caps and line-range hints without badges or content frames');
+  for (const theme of ['dark', 'light']) {
+    await run(theme => { document.body.removeClass('theme-dark', 'theme-light'); document.body.addClass(`theme-${theme}`); }, theme);
+    await capture(`git-workbench-block-brackets-${theme}.png`);
+    const normal = await run(() => [...document.querySelectorAll('.cm-line.gp-block-range')].map(line => getComputedStyle(line).backgroundColor));
+    await run(() => document.querySelector('.gp-block-stage').dispatchEvent(new PointerEvent('pointerenter')));
+    await wait(() => document.querySelectorAll('.cm-merge-a .cm-line.gp-block-range-hover').length === 2 && document.querySelectorAll('.cm-merge-b .cm-line.gp-block-range-hover').length === 3 && document.querySelectorAll('.gp-block-boundary-active').length === 5);
+    check(await run(normal => {
+      const lines = [...document.querySelectorAll('.cm-line.gp-block-range')];
+      return lines.every((line, index) => (getComputedStyle(line).backgroundColor !== normal[index]) === line.classList.contains('gp-block-range-hover') && getComputedStyle(line).boxShadow === 'none' && getComputedStyle(line).backgroundImage === 'none');
+    }, normal), `${theme} theme hover links both gutter brackets and strengthens only the matching red/green ranges`);
+    await capture(`git-workbench-block-brackets-${theme}-hover.png`);
+    await run(() => document.querySelector('.gp-block-stage').dispatchEvent(new PointerEvent('pointerleave')));
+    await wait(() => !document.querySelector('.gp-block-range-hover, .gp-block-boundary-active'));
+  }
+  await run(() => { document.body.removeClass('theme-dark', 'theme-light'); document.body.addClass(`theme-${window.__qaBracketTheme}`); });
   await run(() => document.querySelector('.gp-block-stage').focus());
-  await wait(() => document.querySelectorAll('.cm-merge-a .cm-line.gp-block-range-hover').length === 2 && document.querySelectorAll('.cm-merge-b .cm-line.gp-block-range-hover').length === 3);
+  await wait(() => document.querySelectorAll('.cm-merge-a .cm-line.gp-block-range-hover').length === 2 && document.querySelectorAll('.cm-merge-b .cm-line.gp-block-range-hover').length === 3 && document.querySelectorAll('.gp-block-boundary-active').length === 5);
   await run(() => document.querySelector('.gp-block-stage').blur());
-  await wait(() => !document.querySelector('.cm-line.gp-block-range-hover'));
+  await wait(() => !document.querySelector('.gp-block-range-hover, .gp-block-boundary-active'));
+  await run(() => document.querySelectorAll('.gp-block-stage')[1].dispatchEvent(new PointerEvent('pointerenter')));
+  await wait(() => document.querySelectorAll('.cm-merge-a .cm-line.gp-block-range-hover').length === 2 && !document.querySelector('.cm-merge-b .cm-line.gp-block-range-hover') && document.querySelectorAll('.gp-block-boundary-active').length === 3);
+  check(await run(() => !!document.querySelector('.cm-merge-b .gp-block-single.gp-block-boundary-active')), 'pure deletion highlights its two removed lines and the opposite empty-side bracket');
+  await run(() => document.querySelectorAll('.gp-block-stage')[1].dispatchEvent(new PointerEvent('pointerleave')));
+  await wait(() => !document.querySelector('.gp-block-range-hover, .gp-block-boundary-active'));
+  await run(async () => { const p = app.plugins.plugins['git-workbench']; p.settings.diffMode = 'unified'; await p.openDiff('笔记库/逐行测试.md', { kind: 'index' }, { kind: 'worktree' }); });
+  await wait(() => document.querySelectorAll('.cm-deletedLine.gp-block-range').length === 4 && document.querySelectorAll('.cm-line.gp-block-range').length === 3);
+  await run(() => document.querySelector('.gp-block-stage').focus());
+  await wait(() => document.querySelectorAll('.cm-deletedLine.gp-block-range-hover').length === 2 && document.querySelectorAll('.cm-line.gp-block-range-hover').length === 3 && document.querySelectorAll('.gp-block-boundary-active').length === 5);
+  await run(() => document.querySelector('.gp-block-restore').focus());
+  await wait(() => document.querySelector('.gp-block-restore') === document.activeElement);
+  check(await run(() => {
+    const rows = [...document.querySelectorAll('.gp-block-boundary-active')];
+    return rows.length === 5 && rows.filter(row => row.classList.contains('gp-block-start')).length === 1 && rows.filter(row => row.classList.contains('gp-block-end')).length === 1;
+  }), 'unified replacements share one continuous bracket across old and new rows and retain linked highlighting when focus moves between actions');
+  await capture('git-workbench-block-brackets-unified-replacement.png');
+  await run(async () => { const p = app.plugins.plugins['git-workbench']; p.settings.diffMode = 'split'; await p.openDiff('笔记库/逐行测试.md', { kind: 'index' }, { kind: 'worktree' }); });
+  await wait(() => !!document.querySelector('.cm-merge-b') && document.querySelectorAll('.gp-block-stage').length === 2);
   await run(() => document.querySelector('.gp-block-stage').click());
   await wait(() => !app.plugins.plugins['git-workbench'].controller.busy && document.querySelectorAll('.gp-block-stage').length === 1);
   check(await run(async () => {
@@ -78,13 +113,14 @@ module.exports = async ({ js, check, capture }) => {
   await run(async () => { const p = app.plugins.plugins['git-workbench']; p.settings.stagingMode = 'block'; await p.persistSettings(); p.settings.diffMode = 'unified'; await p.openDiff('笔记库/逐行测试.md', { kind: 'index' }, { kind: 'worktree' }); });
   await wait(() => !!document.querySelector('.cm-deletedChunk .cm-deletedLine.gp-block-range') && !!document.querySelector('.gp-block-stage'));
   const unifiedVisual = await run(() => ({deleted: [...document.querySelectorAll('.cm-deletedChunk .cm-deletedLine')].map(node => ({text: node.textContent, classes: node.className, blockId: node.dataset.gpBlockId})), control: [...document.querySelectorAll('.gp-block-stage')].map(node => node.getAttribute('aria-label'))}));
-  check(unifiedVisual.deleted.length === 1 && unifiedVisual.deleted[0].classes.includes('gp-block-range') && unifiedVisual.control.some(label => label.includes('左侧第 5 至 5 行 → 右侧无修改行')), 'unified view outlines each deleted line and exposes its original-line range');
-  await capture('git-workbench-block-ranges-unified.png');
+  check(unifiedVisual.deleted.length === 1 && unifiedVisual.deleted[0].classes.includes('gp-block-range') && unifiedVisual.control.some(label => label.includes('左侧第 5 至 5 行 → 右侧无修改行')), 'unified view marks deleted ranges with a gutter bracket and exposes the original-line range');
+  await capture('git-workbench-block-brackets-unified.png');
   await run(() => document.querySelector('.gp-block-stage').dispatchEvent(new PointerEvent('pointerenter')));
-  await wait(() => !!document.querySelector('.cm-deletedLine.gp-block-range-hover'));
-  await capture('git-workbench-block-ranges-unified-hover.png');
+  await wait(() => !!document.querySelector('.cm-deletedLine.gp-block-range-hover') && !!document.querySelector('.gp-block-boundary-active'));
+  check(await run(() => getComputedStyle(document.querySelector('.cm-deletedLine.gp-block-range-hover')).boxShadow === 'none'), 'unified deleted range hover keeps its semantic red background without a content frame');
+  await capture('git-workbench-block-brackets-unified-hover.png');
   await run(() => document.querySelector('.gp-block-stage').dispatchEvent(new PointerEvent('pointerleave')));
-  await wait(() => !document.querySelector('.cm-deletedLine.gp-block-range-hover'));
+  await wait(() => !document.querySelector('.gp-block-range-hover, .gp-block-boundary-active'));
   await run(async () => { const p = app.plugins.plugins['git-workbench']; p.settings.stagingMode = 'line'; await p.persistSettings(); await p.openDiff('笔记库/逐行测试.md', { kind: 'index' }, { kind: 'worktree' }); });
   await wait(() => !!document.querySelector('.cm-deletedChunk') && !!document.querySelector('.gp-line-stage'));
   check(await run(() => document.querySelectorAll('.gp-line-stage').length === 1 && document.querySelectorAll('.gp-line-restore').length === 1), 'unified deleted-line gutter provides stage and restore without replacing copyable deleted text');
@@ -102,6 +138,13 @@ module.exports = async ({ js, check, capture }) => {
     const p = app.plugins.plugins['git-workbench']; await app.vault.create('逐行新增.md', 'first\nsecond\nthird\n'); await p.openDiff('笔记库/逐行新增.md', { kind: 'index' }, { kind: 'worktree' });
   });
   await wait(() => document.querySelectorAll('.gp-line-stage').length === 3);
+  await run(() => document.querySelector('.gp-staging-option[data-staging-mode="block"]').click());
+  await wait(() => !!document.querySelector('.gp-block-stage'));
+  await run(() => document.querySelector('.gp-block-stage').focus());
+  await wait(() => document.querySelectorAll('.cm-line.gp-block-range-hover').length === 3 && document.querySelectorAll('.gp-block-boundary-active').length === 3);
+  check(await run(() => document.querySelector('.gp-block-stage').getAttribute('aria-label').includes('左侧无修改行（插入点第 1 行）')), 'pure addition brackets all inserted lines and describes the empty-side insertion point');
+  await run(() => document.querySelector('.gp-staging-option[data-staging-mode="line"]').click());
+  await wait(() => document.querySelectorAll('.gp-line-stage').length === 3 && !document.querySelector('.gp-block-boundary, .gp-block-range-hover'));
   await run(() => document.querySelector('.gp-line-stage[data-after-line="2"]').click());
   await wait(() => !app.plugins.plugins['git-workbench'].controller.busy && document.querySelectorAll('.gp-line-stage').length === 2);
   check(await run(async () => (await app.plugins.plugins['git-workbench'].git.file('笔记库/逐行新增.md', { kind: 'index' })).text === 'second\n'), 'unified untracked files support staging one line without staging the rest');

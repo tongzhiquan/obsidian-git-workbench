@@ -11,22 +11,18 @@ const refreshActions = StateEffect.define<void>();
 const refreshBlockRanges = StateEffect.define<void>();
 type Side = 'left' | 'right';
 type BlockPosition = 'single' | 'start' | 'middle' | 'end';
-interface Row { edit?: LineEdit; actions: LineAction[]; ids?: number[]; block?: LineBlock; blockIndex?: number; blockPosition?: BlockPosition }
+interface Row { edit?: LineEdit; actions: LineAction[]; ids?: number[]; block?: LineBlock; blockPosition?: BlockPosition }
 
 class ActionsMarker extends GutterMarker {
   constructor(private owner: DiffLineActions, private rows: Row[], private disabled: boolean, private selected: string) { super(); }
   eq(other: GutterMarker): boolean { return other instanceof ActionsMarker && this.disabled === other.disabled && this.selected === other.selected && JSON.stringify(this.rows) === JSON.stringify(other.rows); }
   toDOM(): HTMLElement {
     const group = document.createElement('div'); group.className = 'gp-line-action-group';
-    for (const { edit, actions, ids, block, blockIndex, blockPosition } of this.rows) {
+    for (const { edit, actions, ids, block, blockPosition } of this.rows) {
       const row = el(group, 'div', 'gp-line-action-row');
-      if (blockPosition) {
+      if (blockPosition && block) {
         row.classList.add('gp-block-boundary', `gp-block-${blockPosition}`);
-      }
-      if (block && blockIndex && (blockPosition === 'start' || blockPosition === 'single')) {
-        const badge = el(row, 'span', 'gp-block-badge', `块${blockIndex}`);
-        badge.setAttribute('aria-label', `第 ${blockIndex} 个修改块：${this.owner.blockRangeLabel(block!)}`);
-        badge.title = this.owner.blockRangeLabel(block!);
+        row.dataset.gpBlockId = String(block.edits[0].id);
       }
       if (edit && actions.length) {
         row.classList.toggle('is-selected', this.owner.selected.has(edit.id));
@@ -40,9 +36,7 @@ class ActionsMarker extends GutterMarker {
             control.setAttribute('aria-label', label);
             control.addEventListener('pointerenter', () => this.owner.setActiveBlock(edit.id));
             control.addEventListener('focus', () => this.owner.setActiveBlock(edit.id));
-            const clear = () => queueMicrotask(() => {
-              if (!control.matches(':hover') && !control.matches(':focus')) this.owner.setActiveBlock(undefined, edit.id);
-            });
+            const clear = () => queueMicrotask(() => this.owner.clearActiveBlock(edit.id));
             control.addEventListener('pointerleave', clear); control.addEventListener('blur', clear);
           }
           setIcon(control, action === 'stage' ? 'plus' : action === 'restore' ? 'rotate-ccw' : 'minus'); setTooltip(control, label);
@@ -84,6 +78,13 @@ export class DiffLineActions {
     this.activeBlock = next;
     for (const view of this.views) view.dispatch({ effects: refreshBlockRanges.of() });
   }
+  clearActiveBlock(id: number): void {
+    for (const view of this.views) {
+      const controls = view.dom.querySelectorAll<HTMLButtonElement>(`[data-block-id="${id}"]`);
+      if ([...controls].some(control => control.matches(':hover, :focus'))) return;
+    }
+    this.setActiveBlock(undefined, id);
+  }
   decorationsFor(view: EditorView, side: Side): DecorationSet {
     if (this.mode !== 'block') return Decoration.none;
     const decorations = [];
@@ -102,7 +103,11 @@ export class DiffLineActions {
     }
     return decorations.length ? Decoration.set(decorations, true) : Decoration.none;
   }
-  syncDeletedBlockRanges(view: EditorView, unified: boolean): void {
+  syncBlockRanges(view: EditorView, unified: boolean): void {
+    if (!this.alive) return;
+    for (const row of view.dom.querySelectorAll<HTMLElement>('.gp-block-boundary')) {
+      row.classList.toggle('gp-block-boundary-active', this.mode === 'block' && row.dataset.gpBlockId === String(this.activeBlock));
+    }
     if (!unified) return;
     const chunks = getChunks(view.state)?.chunks ?? [], original = getOriginalDoc(view.state);
     for (const widget of view.dom.querySelectorAll<HTMLElement>('.cm-deletedChunk')) {
@@ -125,12 +130,15 @@ export class DiffLineActions {
     const count = side === 'left' ? block.beforeCount : block.afterCount;
     return count === 1 ? 'single' : index === first ? 'start' : index === first + count - 1 ? 'end' : 'middle';
   }
-  private blockNumber(block: LineBlock): number { return this.blocks.indexOf(block) + 1; }
   private blockRow(block: LineBlock, side: Side, unified: boolean, position: BlockPosition, allowAction = true): Row {
     const atStart = position === 'single' || position === 'start';
     const actions: LineAction[] = !atStart || !allowAction ? [] : this.stageable === 'unstage' ? (side === 'left' || unified ? ['unstage'] : [])
       : unified ? ['restore', 'stage'] : [side === 'left' ? 'restore' : 'stage'];
-    return { edit: actions.length ? block.edits[0] : undefined, ids: actions.length ? block.edits.map(edit => edit.id) : undefined, actions, block, blockIndex: this.blockNumber(block), blockPosition: position };
+    // Unified replacements share one bracket across their old and new rows.
+    const boundary = !unified || !block.beforeCount || !block.afterCount ? position
+      : side === 'left' ? (position === 'single' ? 'start' : position === 'end' ? 'middle' : position)
+      : position === 'single' ? 'end' : position === 'start' ? 'middle' : position;
+    return { edit: actions.length ? block.edits[0] : undefined, ids: actions.length ? block.edits.map(edit => edit.id) : undefined, actions, block, blockPosition: boundary };
   }
   private marker(rows: Row[]): GutterMarker | null {
     return rows.some(row => row.blockPosition || row.edit && row.actions.length) ? new ActionsMarker(this, rows, this.disabled, [...this.selected].join(',')) : null;
@@ -144,10 +152,12 @@ export class DiffLineActions {
     const owner = this;
     const blockRanges = ViewPlugin.fromClass(class {
       decorations: DecorationSet;
-      constructor(view: EditorView) { this.decorations = owner.decorationsFor(view, side); }
+      constructor(view: EditorView) {
+        this.decorations = owner.decorationsFor(view, side);
+        queueMicrotask(() => owner.syncBlockRanges(view, unified));
+      }
       update(update: import('@codemirror/view').ViewUpdate): void {
         if (update.docChanged || update.transactions.some(tr => tr.effects.some(effect => effect.is(refreshActions) || effect.is(refreshBlockRanges)))) this.decorations = owner.decorationsFor(update.view, side);
-        if (unified && (update.docChanged || update.transactions.some(tr => tr.effects.some(effect => effect.is(refreshActions) || effect.is(refreshBlockRanges))))) queueMicrotask(() => owner.syncDeletedBlockRanges(update.view, unified));
       }
     }, { decorations: value => value.decorations });
     return [blockRanges, Prec.high(gutter({
@@ -175,7 +185,7 @@ export class DiffLineActions {
           return this.marker(Array.from({ length: last - first + 1 }, (_, i) => {
             if (this.mode === 'block') {
               const index = first + i;
-              const block = this.blocks.find(part => part.beforeIndex <= index && index < part.beforeIndex + part.beforeCount && part.beforeCount > part.afterCount);
+              const block = this.blocks.find(part => part.beforeIndex <= index && index < part.beforeIndex + part.beforeCount);
               return block ? this.blockRow(block, 'left', true, this.blockPosition(block, 'left', index), block.afterCount === 0) : { actions: [] };
             }
             const edit = this.model.edits.find(edit => edit.before !== undefined && edit.beforeIndex === first + i);
@@ -226,7 +236,7 @@ export class DiffLineActions {
         const menu = new Menu(); this.menuItems((title, action) => menu.addItem(item => item.setTitle(title).onClick(action)));
         menu.showAtPosition({ x: event.clientX, y: event.clientY }, this.bar.ownerDocument); event.preventDefault(); return true;
       },
-    }), EditorView.updateListener.of(update => { if (unified) queueMicrotask(() => this.syncDeletedBlockRanges(update.view, unified)); })];
+    }), EditorView.updateListener.of(update => { queueMicrotask(() => this.syncBlockRanges(update.view, unified)); })];
   }
   private fromSelection(view: EditorView, side: Side): Set<number> {
     const ids = new Set<number>();

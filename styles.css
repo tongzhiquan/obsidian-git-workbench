@@ -82,13 +82,13 @@ button.gp-file-link:hover { color: var(--interactive-accent); background: var(--
 .gp-line-selection { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 5px 16px; background: var(--background-secondary); font-size: 12px; }
 .gp-line-selection[hidden] { display: none; }
 .gp-line-selection .gp-muted { margin-right: auto; }
-.gp-line-actions { min-width: 52px; }
+.gp-line-actions { min-width: 28px; }
 .gp-line-action-row { height: 25px; display: flex; align-items: center; justify-content: flex-start; }
-.gp-line-action-row.gp-block-boundary { box-sizing: border-box; border-inline: 2px solid color-mix(in srgb, var(--interactive-accent) 82%, transparent); background-color: color-mix(in srgb, var(--interactive-accent) 13%, transparent); }
-.gp-line-action-row.gp-block-start { border-top: 2px solid color-mix(in srgb, var(--interactive-accent) 88%, transparent); }
-.gp-line-action-row.gp-block-end { border-bottom: 2px solid color-mix(in srgb, var(--interactive-accent) 88%, transparent); }
-.gp-line-action-row.gp-block-single { border-block: 2px solid color-mix(in srgb, var(--interactive-accent) 88%, transparent); }
-.gp-block-badge { flex: 0 0 auto; margin: 0 2px 0 1px; padding: 1px 3px; border-radius: 3px; background: var(--interactive-accent); color: var(--text-on-accent, white); font: 700 9px/14px var(--font-interface); white-space: nowrap; }
+.gp-line-action-row.gp-block-boundary { position: relative; box-sizing: border-box; min-width: 35px; padding-inline-end: 10px; }
+.gp-line-action-row.gp-block-boundary::before { content: ''; position: absolute; inset-block: 0; inset-inline-end: 2px; box-sizing: border-box; width: 6px; border-inline-start: 1px solid var(--text-faint); pointer-events: none; }
+.gp-line-action-row.gp-block-start::before, .gp-line-action-row.gp-block-single::before { border-top: 1px solid var(--text-faint); }
+.gp-line-action-row.gp-block-end::before, .gp-line-action-row.gp-block-single::before { border-bottom: 1px solid var(--text-faint); }
+.gp-line-action-row.gp-block-boundary-active::before { border-color: var(--text-muted); }
 .gp-line-actions .gp-line-action { width: 25px; height: 24px; padding: 3px; display: inline-flex; align-items: center; justify-content: center; background: transparent; border: 0; box-shadow: none; color: var(--interactive-accent); opacity: .35; }
 .gp-line-actions .gp-line-restore { color: var(--text-error); }
 .gp-line-actions .gp-block-restore { color: var(--text-error); }
@@ -113,21 +113,9 @@ button.gp-file-link:hover { color: var(--interactive-accent); background: var(--
 .gp-merge-body .cm-merge-b .cm-changedLine, .gp-merge-body .cm-insertedLine { background-color: color-mix(in srgb, #27b879 12%, transparent); }
 .gp-merge-body .cm-merge-a .cm-changedText, .gp-merge-body .cm-deletedText { background: color-mix(in srgb, #e15c66 28%, transparent); text-decoration: none; }
 .gp-merge-body .cm-merge-b .cm-changedText, .gp-merge-body .cm-insertedLine ins { background: color-mix(in srgb, #27b879 28%, transparent); text-decoration: none; }
-.gp-merge-body .cm-line.gp-block-range { background-image: linear-gradient(color-mix(in srgb, var(--interactive-accent) 13%, transparent), color-mix(in srgb, var(--interactive-accent) 13%, transparent)); box-shadow: inset 2px 0 color-mix(in srgb, var(--interactive-accent) 88%, transparent), inset -2px 0 color-mix(in srgb, var(--interactive-accent) 88%, transparent); }
-.gp-merge-body .cm-line.gp-block-range-start { box-shadow: inset 2px 0 color-mix(in srgb, var(--interactive-accent) 88%, transparent), inset -2px 0 color-mix(in srgb, var(--interactive-accent) 88%, transparent), inset 0 2px color-mix(in srgb, var(--interactive-accent) 88%, transparent); }
-.gp-merge-body .cm-line.gp-block-range-end { box-shadow: inset 2px 0 color-mix(in srgb, var(--interactive-accent) 88%, transparent), inset -2px 0 color-mix(in srgb, var(--interactive-accent) 88%, transparent), inset 0 -2px color-mix(in srgb, var(--interactive-accent) 88%, transparent); }
-.gp-merge-body .cm-line.gp-block-range-start.gp-block-range-end { box-shadow: inset 2px 0 color-mix(in srgb, var(--interactive-accent) 88%, transparent), inset -2px 0 color-mix(in srgb, var(--interactive-accent) 88%, transparent), inset 0 2px color-mix(in srgb, var(--interactive-accent) 88%, transparent), inset 0 -2px color-mix(in srgb, var(--interactive-accent) 88%, transparent); }
-.gp-merge-body .cm-line.gp-block-range-hover { background-image: linear-gradient(color-mix(in srgb, var(--interactive-accent) 30%, transparent), color-mix(in srgb, var(--interactive-accent) 30%, transparent)) !important; box-shadow: inset 4px 0 var(--interactive-accent), inset -4px 0 var(--interactive-accent) !important; }
-.gp-merge-body .cm-line.gp-block-range-hover.gp-block-range-start { box-shadow: inset 4px 0 var(--interactive-accent), inset -4px 0 var(--interactive-accent), inset 0 3px var(--interactive-accent) !important; }
-.gp-merge-body .cm-line.gp-block-range-hover.gp-block-range-end { box-shadow: inset 4px 0 var(--interactive-accent), inset -4px 0 var(--interactive-accent), inset 0 -3px var(--interactive-accent) !important; }
-.gp-merge-body .cm-line.gp-block-range-hover.gp-block-range-start.gp-block-range-end { box-shadow: inset 4px 0 var(--interactive-accent), inset -4px 0 var(--interactive-accent), inset 0 3px var(--interactive-accent), inset 0 -3px var(--interactive-accent) !important; }
-.gp-merge-body .cm-deletedChunk.gp-block-range { box-shadow: inset 2px 0 color-mix(in srgb, var(--interactive-accent) 88%, transparent), inset -2px 0 color-mix(in srgb, var(--interactive-accent) 88%, transparent), inset 0 2px color-mix(in srgb, var(--interactive-accent) 88%, transparent), inset 0 -2px color-mix(in srgb, var(--interactive-accent) 88%, transparent); }
-.gp-merge-body .cm-deletedChunk.gp-block-range-hover { background-image: linear-gradient(color-mix(in srgb, var(--interactive-accent) 30%, transparent), color-mix(in srgb, var(--interactive-accent) 30%, transparent)); box-shadow: inset 4px 0 var(--interactive-accent), inset -4px 0 var(--interactive-accent), inset 0 3px var(--interactive-accent), inset 0 -3px var(--interactive-accent); }
-.gp-merge-body .cm-deletedLine.gp-block-range { display: block; background-image: linear-gradient(color-mix(in srgb, var(--interactive-accent) 16%, transparent), color-mix(in srgb, var(--interactive-accent) 16%, transparent)); box-shadow: inset 2px 0 color-mix(in srgb, var(--interactive-accent) 88%, transparent), inset -2px 0 color-mix(in srgb, var(--interactive-accent) 88%, transparent); }
-.gp-merge-body .cm-deletedLine.gp-block-range-start { box-shadow: inset 2px 0 color-mix(in srgb, var(--interactive-accent) 88%, transparent), inset -2px 0 color-mix(in srgb, var(--interactive-accent) 88%, transparent), inset 0 2px color-mix(in srgb, var(--interactive-accent) 88%, transparent); }
-.gp-merge-body .cm-deletedLine.gp-block-range-end { box-shadow: inset 2px 0 color-mix(in srgb, var(--interactive-accent) 88%, transparent), inset -2px 0 color-mix(in srgb, var(--interactive-accent) 88%, transparent), inset 0 -2px color-mix(in srgb, var(--interactive-accent) 88%, transparent); }
-.gp-merge-body .cm-deletedLine.gp-block-range-start.gp-block-range-end { box-shadow: inset 2px 0 color-mix(in srgb, var(--interactive-accent) 88%, transparent), inset -2px 0 color-mix(in srgb, var(--interactive-accent) 88%, transparent), inset 0 2px color-mix(in srgb, var(--interactive-accent) 88%, transparent), inset 0 -2px color-mix(in srgb, var(--interactive-accent) 88%, transparent); }
-.gp-merge-body .cm-deletedLine.gp-block-range-hover { background-image: linear-gradient(color-mix(in srgb, var(--interactive-accent) 30%, transparent), color-mix(in srgb, var(--interactive-accent) 30%, transparent)); box-shadow: inset 4px 0 var(--interactive-accent), inset -4px 0 var(--interactive-accent) !important; }
+.gp-merge-body .cm-merge-a .cm-line.gp-block-range-hover { background-color: color-mix(in srgb, #e15c66 20%, transparent); }
+.gp-merge-body .cm-merge-b .cm-line.gp-block-range-hover, .gp-merge-body > .cm-editor .cm-line.gp-block-range-hover { background-color: color-mix(in srgb, #27b879 20%, transparent); }
+.gp-merge-body .cm-deletedLine.gp-block-range-hover { background-color: color-mix(in srgb, #e15c66 8%, transparent); }
 .gp-merge-body .cm-collapsedLines { background: var(--background-secondary) !important; color: var(--text-muted) !important; border-block: 1px solid var(--background-modifier-border); font-size: 11px; }
 .gp-merge-body .cm-content { caret-color: var(--text-normal); }
 .gp-merge-body .cm-content, .gp-merge-body .cm-line, .gp-merge-body .cm-deletedChunk { user-select: text; -webkit-user-select: text; }
