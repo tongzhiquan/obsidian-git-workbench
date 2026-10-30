@@ -116,7 +116,7 @@ export class DiffLineActions {
       const first = original.lineAt(chunk.fromA).number - 1;
       for (const [offset, line] of [...widget.querySelectorAll<HTMLElement>('.cm-deletedLine')].entries()) {
         const index = first + offset;
-        const block = this.mode === 'block' ? this.blocks.find(part => part.beforeCount > 0 && part.beforeIndex <= index && index < part.beforeIndex + part.beforeCount) : undefined;
+        const block = this.mode === 'block' ? this.blockAt('left', index) : undefined;
         line.classList.toggle('gp-block-range', !!block);
         line.classList.toggle('gp-block-range-start', !!block && index === block.beforeIndex);
         line.classList.toggle('gp-block-range-end', !!block && index === block.beforeIndex + block.beforeCount - 1);
@@ -124,6 +124,12 @@ export class DiffLineActions {
         if (block) line.dataset.gpBlockId = String(block.edits[0].id); else delete line.dataset.gpBlockId;
       }
     }
+  }
+  private blockAt(side: Side, index: number): LineBlock | undefined {
+    return this.blocks.find(block => {
+      const first = side === 'left' ? block.beforeIndex : block.afterIndex, count = side === 'left' ? block.beforeCount : block.afterCount;
+      return index >= first && index < first + count;
+    });
   }
   private blockPosition(block: LineBlock, side: Side, index: number): BlockPosition {
     const first = side === 'left' ? block.beforeIndex : block.afterIndex;
@@ -158,6 +164,7 @@ export class DiffLineActions {
       }
       update(update: import('@codemirror/view').ViewUpdate): void {
         if (update.docChanged || update.transactions.some(tr => tr.effects.some(effect => effect.is(refreshActions) || effect.is(refreshBlockRanges)))) this.decorations = owner.decorationsFor(update.view, side);
+        queueMicrotask(() => owner.syncBlockRanges(update.view, unified));
       }
     }, { decorations: value => value.decorations });
     return [blockRanges, Prec.high(gutter({
@@ -166,10 +173,7 @@ export class DiffLineActions {
         this.views.add(view);
         const index = view.state.doc.lineAt(line.from).number - 1;
         if (this.mode === 'block') {
-          const block = this.blocks.find(part => {
-            const first = side === 'left' ? part.beforeIndex : part.afterIndex, count = side === 'left' ? part.beforeCount : part.afterCount;
-            return count > 0 && index >= first && index < first + count;
-          });
+          const block = this.blockAt(side, index);
           return block ? this.marker([this.blockRow(block, side, unified, this.blockPosition(block, side, index))]) : null;
         }
         const edits = this.model.edits.filter(edit => side === 'left' ? edit.before !== undefined && edit.beforeIndex === index : edit.after !== undefined && edit.afterIndex === index);
@@ -185,7 +189,7 @@ export class DiffLineActions {
           return this.marker(Array.from({ length: last - first + 1 }, (_, i) => {
             if (this.mode === 'block') {
               const index = first + i;
-              const block = this.blocks.find(part => part.beforeIndex <= index && index < part.beforeIndex + part.beforeCount);
+              const block = this.blockAt('left', index);
               return block ? this.blockRow(block, 'left', true, this.blockPosition(block, 'left', index), block.afterCount === 0) : { actions: [] };
             }
             const edit = this.model.edits.find(edit => edit.before !== undefined && edit.beforeIndex === first + i);
@@ -236,7 +240,7 @@ export class DiffLineActions {
         const menu = new Menu(); this.menuItems((title, action) => menu.addItem(item => item.setTitle(title).onClick(action)));
         menu.showAtPosition({ x: event.clientX, y: event.clientY }, this.bar.ownerDocument); event.preventDefault(); return true;
       },
-    }), EditorView.updateListener.of(update => { queueMicrotask(() => this.syncBlockRanges(update.view, unified)); })];
+    })];
   }
   private fromSelection(view: EditorView, side: Side): Set<number> {
     const ids = new Set<number>();

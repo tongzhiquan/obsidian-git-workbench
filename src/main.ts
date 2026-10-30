@@ -2,7 +2,7 @@ import { FileSystemAdapter, FileView, MarkdownView, Menu, Modal, Notice, Platfor
 import { GitService } from './git/service';
 import { RepositoryController } from './controller';
 import { editorExtensions } from './editor';
-import { DEFAULT_SETTINGS, HEAD, INDEX, WORKTREE, type Operation, type Revision, type Settings } from './types';
+import { DEFAULT_SETTINGS, INDEX, WORKTREE, type Operation, type Revision, type Settings } from './types';
 import { WorkbenchView, WORKBENCH } from './ui/workbench';
 import { SourceControlView, SOURCE_CONTROL } from './ui/source-control';
 import { button, ConfirmModal, el, PromptModal } from './ui/common';

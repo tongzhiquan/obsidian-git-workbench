@@ -85,6 +85,37 @@ test('index edit rejects external modifications and Git locks without losing dat
   } finally { await f.close(); }
 });
 
+for (const action of ['saveIndex', 'applyLines'] as const) test('failed ' + action + ' updates preserve the index and clean temporary files before retry', async () => {
+  const f = await fixture(); try {
+    const head = await f.seed('note.md', 'one\r\ntwo\r\n');
+    await writeFile(join(f.root, 'other.md'), 'other staged\n'); await f.git.stage(['other.md']);
+    const working = 'ONE\r\nTWO\r\n'; await writeFile(join(f.root, 'note.md'), working);
+    const base = await f.git.file('note.md', INDEX), diff = await f.git.diff('note.md');
+    const indexPath = join(f.git.repo!.gitDir, 'index'), indexBytes = await readFile(indexPath);
+    const original = f.git.runner.text.bind(f.git.runner);
+    const update = () => action === 'saveIndex' ? f.git.saveIndex('note.md', 'saved\r\ntwo\r\n', base) : f.git.applyLines(diff, [0]);
+    f.git.runner.text = async (args, options) => {
+      const result = await original(args, options);
+      if (args[0] === 'update-index' && options?.indexFile) {
+        // Fail after a real temporary-index write, leaving its lock for the owner to clean up.
+        await writeFile(options.indexFile + '.lock', 'unfinished temporary update');
+        throw new Error('simulated index update failure');
+      }
+      return result;
+    };
+    try { await assert.rejects(update(), /simulated index update failure/); }
+    finally { f.git.runner.text = original; }
+    assert.deepEqual(await readFile(indexPath), indexBytes);
+    assert.equal(await readFile(join(f.root, 'note.md'), 'utf8'), working);
+    assert.equal((await f.git.status()).head, head);
+    assert.equal((await f.git.file('other.md', INDEX)).text, 'other staged\n');
+    assert.equal((await readdir(f.git.repo!.gitDir)).some(name => /git-workbench-|index.lock/.test(name)), false);
+    await update();
+    assert.equal((await f.git.file('note.md', INDEX)).text, action === 'saveIndex' ? 'saved\r\ntwo\r\n' : 'ONE\r\ntwo\r\n');
+    assert.equal((await readdir(f.git.repo!.gitDir)).some(name => /git-workbench-|index.lock/.test(name)), false);
+  } finally { await f.close(); }
+});
+
 test('saving working files preserves staged snapshot, HEAD, exact line endings and permissions', async () => {
   const f = await fixture(true); try {
     const path = '笔记库/中文 [x] $ ` ;.md'; const head = await f.seed(path, 'original\r\n');

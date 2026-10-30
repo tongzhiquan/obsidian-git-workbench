@@ -149,25 +149,14 @@ export class GitService {
     this.path(path);
     if (!base.exists || base.binary || base.large || !/^100(644|755) [a-f0-9]+ 0\t/.test(base.indexEntry ?? '') || base.indexEntry!.includes('\0')) throw new Error('仅支持编辑暂存区中无冲突的普通文本文件');
     if (text.includes('\0') || Buffer.byteLength(text) > MAX_TEXT) throw new Error('暂存区编辑仅支持 2 MiB 以内且不含 NUL 的文本');
-    await this.runner.write(async () => {
-      const index = resolve(this.root(), (await this.runner.text(['rev-parse', '--git-path', 'index'])).trim());
-      const lock = index + '.lock', temporary = index + '.git-workbench-' + randomUUID();
-      const handle = await open(lock, 'wx').catch(error => { if (error.code === 'EEXIST') throw new Error('Git index.lock 已存在，请等待其他 Git 操作完成后重试；未保存的编辑仍保留在比较器中'); throw error; });
-      let installed = false;
-      try {
-        if (await this.indexEntry(path) !== base.indexEntry) throw new Error('暂存区已被其他操作修改，未覆盖；可复制未保存的编辑内容后重新加载文件');
-        await copyFile(index, temporary);
-        // The editor works on the blob itself: do not run worktree clean filters a second time.
-        const object = (await this.runner.text(['hash-object', '-w', '--stdin', '--no-filters'], { input: text })).trim();
-        await this.runner.text(['update-index', '--cacheinfo', base.indexEntry!.split(' ')[0], object, path], { indexFile: temporary });
-        await handle.writeFile(await readFile(temporary)); await handle.sync(); await handle.close();
-        await rename(lock, index); installed = true;
-      } finally {
-        await handle.close().catch(() => {});
-        if (!installed) await unlink(lock).catch(() => {});
-        await unlink(temporary).catch(() => {}); await unlink(temporary + '.lock').catch(() => {});
-      }
-    });
+    await this.withIndexUpdate(async (index, temporary, install) => {
+      if (await this.indexEntry(path) !== base.indexEntry) throw new Error('暂存区已被其他操作修改，未覆盖；可复制未保存的编辑内容后重新加载文件');
+      await copyFile(index, temporary);
+      // The editor works on the blob itself: do not run worktree clean filters a second time.
+      const object = (await this.runner.text(['hash-object', '-w', '--stdin', '--no-filters'], { input: text })).trim();
+      await this.runner.text(['update-index', '--cacheinfo', base.indexEntry!.split(' ')[0], object, path], { indexFile: temporary });
+      await install();
+    }, 'Git index.lock 已存在，请等待其他 Git 操作完成后重试；未保存的编辑仍保留在比较器中');
   }
   async diff(path: string, left: Revision = INDEX, right: Revision = WORKTREE, oldPath = path, knownIndex?: FileContent): Promise<FileDiff> {
     this.path(path); this.path(oldPath);
@@ -211,45 +200,52 @@ export class GitService {
     };
     await this.runner.write(() => indexBase ? this.withIndexLock(work) : work());
   }
-  private async withIndexLock<T>(work: (index: string, handle: Awaited<ReturnType<typeof open>>, owner: { installed: boolean }) => Promise<T>): Promise<T> {
+  private async withIndexLock<T>(work: (index: string, handle: Awaited<ReturnType<typeof open>>, owner: { installed: boolean }) => Promise<T>, lockMessage = 'Git index.lock 已存在，请等待其他 Git 操作完成后重试'): Promise<T> {
     const index = resolve(this.root(), (await this.runner.text(['rev-parse', '--git-path', 'index'])).trim()), lock = index + '.lock';
-    const handle = await open(lock, 'wx').catch(error => { if (error.code === 'EEXIST') throw new Error('Git index.lock 已存在，请等待其他 Git 操作完成后重试'); throw error; });
+    const handle = await open(lock, 'wx').catch(error => { if (error.code === 'EEXIST') throw new Error(lockMessage); throw error; });
     const owner = { installed: false };
     try { return await work(index, handle, owner); }
     finally { await handle.close().catch(() => {}); if (!owner.installed) await unlink(lock).catch(() => {}); }
+  }
+  private withIndexUpdate<T>(work: (index: string, temporary: string, install: () => Promise<void>) => Promise<T>, lockMessage?: string): Promise<T> {
+    return this.runner.write(() => this.withIndexLock(async (index, handle, owner) => {
+      const temporary = index + '.git-workbench-' + randomUUID();
+      const install = async () => {
+        await handle.writeFile(await readFile(temporary)); await handle.sync(); await handle.close();
+        await rename(index + '.lock', index); owner.installed = true;
+      };
+      try { return await work(index, temporary, install); }
+      finally { await unlink(temporary).catch(() => {}); await unlink(temporary + '.lock').catch(() => {}); }
+    }, lockMessage));
   }
   async applyLines(diff: FileDiff, ids: readonly number[]): Promise<FileDiff> {
     const model = lineEdits(diff.before.text, diff.after.text);
     if (!diff.lineActions || !diff.stageable || !model) throw new Error('此文件不能按行暂存');
     const text = selectedText(model, ids, diff.stageable === 'unstage');
     if (Buffer.byteLength(text) > MAX_TEXT) throw new Error('暂存内容超过 2 MiB，请使用整文件暂存');
-    return this.runner.write(async () => this.withIndexLock(async (index, handle, owner) => {
+    return this.withIndexUpdate(async (index, temporary, install) => {
       const current = await this.diff(diff.path, diff.left, diff.right, diff.oldPath, diff.stageable === 'stage' ? diff.before : diff.after);
       if (!current.lineActions || current.before.text !== diff.before.text || current.before.exists !== diff.before.exists || current.before.mode !== diff.before.mode || current.before.indexEntry !== diff.before.indexEntry || current.after.text !== diff.after.text || current.after.exists !== diff.after.exists || current.after.mode !== diff.after.mode || current.after.indexEntry !== diff.after.indexEntry) throw new Error('文件或暂存区已变化，请刷新差异后重试');
       const base = diff.stageable === 'stage' ? diff.before : diff.after;
       const destination = diff.stageable === 'stage' ? diff.after : diff.before;
       const remove = !destination.exists && ids.length === model.edits.length;
-      const temporary = index + '.git-workbench-' + randomUUID();
-      try {
-        let saved: FileContent = { ...missing(), indexEntry: '' };
-        await copyFile(index, temporary).catch(async error => { if (error.code !== 'ENOENT') throw error; await this.runner.text(['read-tree', '--empty'], { indexFile: temporary }); });
-        if (remove) await this.runner.text(['update-index', '--force-remove', '--', diff.path], { indexFile: temporary });
-        else {
-          const object = (await this.runner.text(['hash-object', '-w', ...(diff.stageable === 'stage' ? ['--path=' + diff.path] : ['--no-filters']), '--stdin'], { input: text })).trim();
-          const mode = base.mode ?? destination.mode ?? '100644';
-          const [, blob] = await Promise.all([
-            this.runner.text(['update-index', '--add', '--cacheinfo', mode, object, diff.path], { indexFile: temporary }),
-            this.runner.run(['cat-file', 'blob', object]),
-          ]);
-          saved = { ...content(blob), mode, indexEntry: `${mode} ${object} 0\t${diff.path}` };
-        }
-        await handle.writeFile(await readFile(temporary)); await handle.sync(); await handle.close();
-        await rename(index + '.lock', index); owner.installed = true;
-        const before = diff.stageable === 'stage' ? saved : current.before, after = diff.stageable === 'unstage' ? saved : current.after;
-        const patch = createTwoFilesPatch(current.oldPath, current.path, before.text, after.text, '', '', { context: 3 });
-        return { ...current, before, after, patch, hunks: parseHunks(patch) };
-      } finally { await unlink(temporary).catch(() => {}); await unlink(temporary + '.lock').catch(() => {}); }
-    }));
+      let saved: FileContent = { ...missing(), indexEntry: '' };
+      await copyFile(index, temporary).catch(async error => { if (error.code !== 'ENOENT') throw error; await this.runner.text(['read-tree', '--empty'], { indexFile: temporary }); });
+      if (remove) await this.runner.text(['update-index', '--force-remove', '--', diff.path], { indexFile: temporary });
+      else {
+        const object = (await this.runner.text(['hash-object', '-w', ...(diff.stageable === 'stage' ? ['--path=' + diff.path] : ['--no-filters']), '--stdin'], { input: text })).trim();
+        const mode = base.mode ?? destination.mode ?? '100644';
+        const [, blob] = await Promise.all([
+          this.runner.text(['update-index', '--add', '--cacheinfo', mode, object, diff.path], { indexFile: temporary }),
+          this.runner.run(['cat-file', 'blob', object]),
+        ]);
+        saved = { ...content(blob), mode, indexEntry: `${mode} ${object} 0\t${diff.path}` };
+      }
+      await install();
+      const before = diff.stageable === 'stage' ? saved : current.before, after = diff.stageable === 'unstage' ? saved : current.after;
+      const patch = createTwoFilesPatch(current.oldPath, current.path, before.text, after.text, '', '', { context: 3 });
+      return { ...current, before, after, patch, hunks: parseHunks(patch) };
+    });
   }
   async stage(paths: string[]): Promise<void> { paths.forEach(p => this.path(p)); if (!paths.length) return; await this.runner.write(async () => { await this.pathsCommand(['add', '-A'], paths); }); }
   async unstage(paths: string[]): Promise<void> {

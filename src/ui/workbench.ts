@@ -1,7 +1,7 @@
 import { ItemView, Menu, Notice, Scope, setIcon, type WorkspaceLeaf } from 'obsidian';
 import { EditorView } from '@codemirror/view';
 import type GitWorkbench from '../main';
-import { EMPTY, HEAD, INDEX, WORKTREE, type Commit, type GitRef, type LogFilter, type Revision } from '../types';
+import { EMPTY, INDEX, WORKTREE, type Commit, type GitRef, type LogFilter, type Revision } from '../types';
 import { layoutGraph, type GraphRow } from '../git/graph';
 import { button, ConfirmModal, date, el, empty, input, message, PromptModal, select, virtualList } from './common';
 import { renderDiff, type DiffRenderer } from './diff';
