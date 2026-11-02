@@ -2,6 +2,12 @@
 
 按验证日期记录测试范围、结果和限制；历史记录描述当时状态，不代表后续修改均已覆盖。验证方法与结果索引见 [验证说明](../VALIDATION.md)。
 
+## 2026-11-02 0.5.1 修复版本
+
+- `main` 合入重命名后再次暂存的修复，版本同步为 0.5.1；最低 Obsidian 版本保持 1.14.4，更新日志按发布日期归档。
+- 83 项 Git/单元测试、类型检查、构建和打包通过；发布校验确认 manifest、package、锁文件和 versions 映射一致，ZIP 内含正确版本、运行文件和许可声明。
+- 0.5.1 完整隔离 Obsidian 回归 180 项通过，运行时异常 0；未安装真实笔记库。记录为 `.qa/release-0.5.1-unit.log`、`.qa/release-0.5.1-package.log`、`.qa/release-0.5.1-obsidian.log` 和 `.qa/release-0.5.1-obsidian-results.json`。
+
 ## 2026-11-02 重命名后的侧栏暂存路径
 
 - 分支 `codex/fix-staged-rename-staging` 针对“重命名已暂存后继续编辑，右侧树文件 `+` 报 pathspec”修复路径选择：暂存只使用工作区侧的新路径；取消暂存使用索引侧的新旧路径；自动备份复用同一规则。
