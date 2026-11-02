@@ -1,4 +1,5 @@
 import type { FileStatus } from '../types';
+import { statusPaths } from '../git/status-paths';
 
 export type SourceGroup = 'conflict' | 'index' | 'worktree' | 'untracked';
 export type SourceRow =
@@ -22,8 +23,8 @@ export function scopedSourceFiles(files: FileStatus[], prefix: string, vaultOnly
   });
 }
 
-export function sourcePaths(files: FileStatus[], prefix: string, vaultOnly: boolean): string[] {
-  return [...new Set(scopedSourceFiles(files, prefix, vaultOnly).flatMap(file => file.oldPath ? [file.oldPath, file.path] : [file.path]))]
+export function sourcePaths(files: FileStatus[], prefix: string, vaultOnly: boolean, target: 'index' | 'worktree' = 'worktree'): string[] {
+  return statusPaths(scopedSourceFiles(files, prefix, vaultOnly), target)
     .filter(path => !vaultOnly || !prefix || path.startsWith(prefix + '/'));
 }
 

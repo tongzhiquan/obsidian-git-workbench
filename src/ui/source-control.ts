@@ -232,7 +232,7 @@ export class SourceControlView extends ItemView {
     };
   }
   private stage(files: FileStatus[], unstage: boolean): Promise<unknown> {
-    const paths = sourcePaths(files, this.plugin.git.repo?.vaultPrefix ?? '', this.plugin.settings.sourceControlVaultOnly);
+    const paths = sourcePaths(files, this.plugin.git.repo?.vaultPrefix ?? '', this.plugin.settings.sourceControlVaultOnly, unstage ? 'index' : 'worktree');
     if (!paths.length) return Promise.resolve();
     if (paths.some(path => this.plugin.indexEdits.has(path) || this.plugin.worktreeEdits.has(path))) { new Notice('请先保存比较器中的文件修改，再调整暂存状态'); return Promise.resolve(); }
     return this.plugin.run(unstage ? '取消暂存' : '暂存', async () => { if (!unstage) await this.plugin.flushEditors(); if (unstage) await this.plugin.git.unstage(paths); else await this.plugin.git.stage(paths); });

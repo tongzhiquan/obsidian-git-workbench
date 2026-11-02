@@ -1,4 +1,5 @@
 import { GitService } from './git/service';
+import { statusPaths } from './git/status-paths';
 import { formatCommitMessage } from './commit-message';
 import type { BlameLine, BlameChange, Commit, FileDiff, LogFilter, RepoStatus, Revision, Settings } from './types';
 export class LruCache<T> {
@@ -78,8 +79,7 @@ export class RepositoryController {
         await flush(); const status = await this.git.status();
         if (status.operation || status.files.some(f => f.conflict)) throw new Error('仓库有未完成操作或冲突，自动备份已暂停');
         if (status.files.length) {
-          const paths = status.files.flatMap(f => f.oldPath ? [f.oldPath, f.path] : [f.path]);
-          await this.git.stage([...new Set(paths)]);
+          await this.git.stage(statusPaths(status.files, 'worktree'));
           await this.git.commit(formatCommitMessage(this.settings.commitTemplate));
         }
         if (this.settings.autoSync) { await this.git.network('fetch'); await this.git.network('pull'); await this.git.network('push'); }

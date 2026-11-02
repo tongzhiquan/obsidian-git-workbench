@@ -113,4 +113,5 @@ module.exports = async ({ window, js, check, capture }) => {
   await capture('git-workbench-sidebar-narrow.png');
   await run(() => { const side = app.workspace.rightSplit.containerEl; if (window.__qaSideStyle === null) side.removeAttribute('style'); else side.setAttribute('style', window.__qaSideStyle); });
   await require('./source-scope.cjs')({ js, check, capture });
+  if (process.env.GIT_WORKBENCH_QA_SOURCE_CONTROL_ONLY === '1' || process.env.GIT_WORKBENCH_QA_RENAME_ONLY === '1') await require('./source-rename.cjs')({ js, check });
 };
