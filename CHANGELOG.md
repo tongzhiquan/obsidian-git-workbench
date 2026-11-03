@@ -4,6 +4,8 @@
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-11-03
+
 ### 新增
 
 - 界面支持跟随 Obsidian、简体中文和 English 三种语言选项；设置保存后，手动重载插件或重启 Obsidian 生效。命令、菜单、比较区、行归属及插件提示均支持中英文。
@@ -128,6 +130,7 @@
 - 本地路径配置、构建与打包、CLI 重载、隔离仓库与 Obsidian 集成验证脚本。
 - MIT 许可证及第三方许可声明。
 
+[0.6.0]: https://github.com/tongzhiquan/obsidian-git-workbench/releases/tag/0.6.0
 [0.4.0]: https://github.com/tongzhiquan/obsidian-git-workbench/releases/tag/0.4.0
 [0.3.0]: https://github.com/tongzhiquan/obsidian-git-workbench/releases/tag/0.3.0
 [0.2.0]: https://github.com/tongzhiquan/obsidian-git-workbench/releases/tag/v0.2.0
