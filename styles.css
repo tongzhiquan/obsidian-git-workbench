@@ -178,6 +178,11 @@ button.gp-sc-filter.is-active { color: var(--text-accent); background: var(--bac
 .gp-sc-message { position: relative; margin: 2px 8px 0; flex-shrink: 0; }
 .gp-source-control .gp-commit-input { display: block; min-height: 38px; max-height: 96px; padding: 7px 30px 7px 8px; width: 100%; font-size: 12px; line-height: 20px; resize: none; margin: 0; }
 .gp-source-control .gp-generate-ai-message { position: absolute; top: 4px; right: 3px; padding: 3px; width: 23px; }
+.gp-settings .gp-settings-title { margin: 0 0 var(--size-4-4); padding: 0; }
+.gp-settings h3.gp-settings-heading { display: flex; align-items: center; gap: var(--size-4-2); margin: var(--size-4-6) 0 var(--size-4-2); padding: 0 0 var(--size-4-2); border-bottom: 1px solid var(--background-modifier-border); font-size: var(--font-ui-medium); }
+.gp-settings .gp-settings-heading-icon { display: inline-flex; flex-shrink: 0; color: var(--text-accent); }
+.gp-settings .gp-settings-heading-icon svg { width: var(--size-4-4); height: var(--size-4-4); }
+.gp-settings .gp-settings-description { margin: 0 0 var(--size-4-4); padding: 0; color: var(--text-muted); font-size: var(--font-ui-small); line-height: var(--line-height-normal); }
 .gp-ai-prompt.setting-item { flex-direction: column; align-items: stretch; gap: 12px; }
 .gp-ai-prompt .setting-item-control { flex-direction: column; align-items: stretch; gap: 8px; }
 .gp-ai-prompt textarea { width: 100%; min-height: 240px; resize: vertical; }

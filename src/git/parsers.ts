@@ -82,20 +82,47 @@ export function parseBlame(raw: string): BlameLine[] {
   }
   return result;
 }
-export function conflictBlocks(text: string): ConflictBlock[] {
-  const lines = text.match(/[^\n]*\n|[^\n]+$/g) ?? []; const result: ConflictBlock[] = []; let offset = 0;
-  for (let i = 0; i < lines.length; i++) {
-    if (!/^<{7}(?: |\r?$)/.test(lines[i])) { offset += lines[i].length; continue; }
-    const start = offset; let ours = '', base = '', theirs = ''; let part: 'ours' | 'base' | 'theirs' = 'ours'; let ended = false;
-    offset += lines[i].length;
-    for (i++; i < lines.length; i++) {
-      const line = lines[i]; offset += line.length;
-      if (/^\|{7}(?: |\r?$)/.test(line)) part = 'base';
-      else if (/^={7}\r?\n?$/.test(line)) part = 'theirs';
-      else if (/^>{7}(?: |\r?$)/.test(line)) { ended = true; break; }
-      else if (part === 'ours') ours += line; else if (part === 'base') base += line; else theirs += line;
-    }
-    if (ended) result.push({ start, end: offset, ours, base, theirs });
+const conflictLines = (text: string): string[] => text.match(/[^\n]*\n|[^\n]+$/g) ?? [];
+const markerText = (line: string): string => line.replace(/\r?\n$/, '');
+function markerKind(line: string, size: number): string | undefined {
+  const text = markerText(line), run = /^([<|=>])\1*/.exec(text);
+  if (!run || run[0].length !== size) return;
+  const suffix = text.slice(size);
+  if (run[1] === '=' ? suffix.trim() !== '' : suffix !== '' && !/^[ \t]/.test(suffix)) return;
+  return run[1];
+}
+export function conflictBlocks(text: string, markerSize = 7): ConflictBlock[] {
+  const result: ConflictBlock[] = []; let offset = 0;
+  let block: { start: number; ours: string; base: string; theirs: string; part: 'ours' | 'base' | 'theirs'; invalid: boolean } | undefined;
+  for (const line of conflictLines(text)) {
+    const kind = markerKind(line, markerSize);
+    if (kind === '<') block = { start: offset, ours: '', base: '', theirs: '', part: 'ours', invalid: false };
+    else if (block && kind === '|') { if (block.part !== 'ours') block.invalid = true; block.part = 'base'; }
+    else if (block && kind === '=') { if (block.part === 'theirs') block.invalid = true; block.part = 'theirs'; }
+    else if (kind === '>') {
+      if (block && block.part === 'theirs' && !block.invalid) result.push({ start: block.start, end: offset + line.length, ours: block.ours, base: block.base, theirs: block.theirs });
+      block = undefined;
+    } else if (block) block[block.part] += line;
+    offset += line.length;
   }
   return result;
+}
+// Recognize orphaned markers too. Literal marker lines already present in the
+// source versions (for example a Markdown heading underline) may be preserved.
+export function remainingConflictMarkers(text: string, markerSize = 7, sources: readonly string[] = []): number[] {
+  const literals = new Map<string, number>();
+  for (const source of sources) {
+    const counts = new Map<string, number>();
+    for (const line of conflictLines(source)) if (markerKind(line, markerSize)) {
+      const key = markerText(line); counts.set(key, (counts.get(key) ?? 0) + 1);
+    }
+    for (const [key, count] of counts) literals.set(key, Math.max(count, literals.get(key) ?? 0));
+  }
+  const remaining: number[] = [];
+  conflictLines(text).forEach((line, index) => {
+    if (!markerKind(line, markerSize)) return;
+    const key = markerText(line), allowed = literals.get(key) ?? 0;
+    if (allowed) literals.set(key, allowed - 1); else remaining.push(index + 1);
+  });
+  return remaining;
 }

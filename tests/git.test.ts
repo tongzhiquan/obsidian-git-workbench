@@ -8,7 +8,7 @@ import { GitService } from '../src/git/service';
 import { GitRunner } from '../src/git/runner';
 import { layoutGraph } from '../src/git/graph';
 import { conflictBlocks, parseStatus } from '../src/git/parsers';
-import { HEAD, INDEX, WORKTREE } from '../src/types';
+import { HEAD, INDEX, WORKTREE, parseRevision } from '../src/types';
 import { RepositoryController } from '../src/controller';
 import { DEFAULT_SETTINGS } from '../src/types';
 async function fixture(nested = false) {
@@ -273,6 +273,87 @@ test('merge conflicts, editable blocks, external edits and continuation/abort', 
     await assert.rejects(f.git.resolveConflict('note.md', 'result', c.result, c.result), /冲突标记/);
     await f.git.resolveConflict('note.md', 'result', 'both\n', c.result); await f.git.continueOperation('merge'); assert.equal((await f.git.status()).files.length, 0);
     await f.git.branch('create', 'conflict-again'); await f.seed('note.md', 'new theirs\n'); await f.git.branch('switch', 'main'); await f.seed('note.md', 'new ours\n'); await assert.rejects(f.git.integrate('merge', 'conflict-again')); await f.git.continueOperation('merge', true); assert.equal((await f.git.status()).operation, undefined);
+  } finally { await f.close(); }
+});
+test('a supported pair of text versions cannot save an oversized merge result as an empty file', async () => {
+  const f = await fixture(); try {
+    await f.seed('note.md', 'base\n'); await f.git.branch('create', 'other');
+    await f.seed('note.md', 't'.repeat(1100000) + '\n'); await f.git.branch('switch', 'main');
+    await f.seed('note.md', 'o'.repeat(1100000) + '\n'); await assert.rejects(f.git.integrate('merge', 'other'));
+    const before = await readFile(join(f.root, 'note.md'));
+    const stages = await f.runner.text(['ls-files', '-u', '--', 'note.md']);
+    const conflict = await f.git.conflict('note.md');
+    assert.ok(conflict.ours.size < 2 * 1024 * 1024 && conflict.theirs.size < 2 * 1024 * 1024);
+    assert.ok(before.length > 2 * 1024 * 1024);
+    assert.equal(conflict.fileLevel, true); assert.equal(conflict.result, null); assert.deepEqual(conflict.blocks, []);
+    await assert.rejects(f.git.resolveConflict('note.md', 'result', '', conflict.result), /文件级/);
+    assert.deepEqual(await readFile(join(f.root, 'note.md')), before);
+    assert.equal(await f.runner.text(['ls-files', '-u', '--', 'note.md']), stages);
+    await f.git.resolveConflict('note.md', 'ours', undefined, conflict.result);
+    assert.equal((await f.git.file('note.md', INDEX)).text, conflict.ours.text);
+    const [backup] = await safetyCopies(f.git);
+    assert.deepEqual(await readFile(join(f.git.repo!.gitDir, 'git-workbench-backups', backup.id + '.bin')), before);
+  } finally { await f.close(); }
+});
+test('binary or missing working results are not editable, while an actual empty text result remains valid', async () => {
+  const f = await fixture(); try {
+    await f.seed('note.md', 'base\n'); await f.git.branch('create', 'other'); await f.seed('note.md', 'theirs\n');
+    await f.git.branch('switch', 'main'); await f.seed('note.md', 'ours\n'); await assert.rejects(f.git.integrate('merge', 'other'));
+    const stages = await f.runner.text(['ls-files', '-u', '--', 'note.md']);
+    const bytes = Buffer.from([0, 255, 1]); await writeFile(join(f.root, 'note.md'), bytes);
+    const binary = await f.git.conflict('note.md'); assert.equal(binary.fileLevel, true); assert.equal(binary.result, null);
+    await assert.rejects(f.git.resolveConflict('note.md', 'result', ''), /文件级/);
+    assert.deepEqual(await readFile(join(f.root, 'note.md')), bytes);
+    await rm(join(f.root, 'note.md'));
+    assert.equal((await f.git.conflict('note.md')).result, null);
+    await assert.rejects(f.git.resolveConflict('note.md', 'result', ''), /文件级/);
+    assert.equal(await f.runner.text(['ls-files', '-u', '--', 'note.md']), stages);
+    await writeFile(join(f.root, 'note.md'), '');
+    const empty = await f.git.conflict('note.md'); assert.equal(empty.fileLevel, false); assert.equal(empty.result, '');
+    await assert.rejects(f.git.resolveConflict('note.md', 'result', 'x'.repeat(2 * 1024 * 1024 + 1)), /2 MiB/);
+    await assert.rejects(f.git.resolveConflict('note.md', 'result', 'bad\0text'), /2 MiB/);
+    await f.git.resolveConflict('note.md', 'result', '', empty.result);
+    assert.equal((await f.git.file('note.md', INDEX)).text, ''); assert.equal((await f.git.status()).files.some(file => file.conflict), false);
+  } finally { await f.close(); }
+});
+test('configured marker widths and leftover markers are checked before changing the file or index', async () => {
+  const f = await fixture(); try {
+    await writeFile(join(f.root, '.gitattributes'), 'note.md conflict-marker-size=9\n'); await f.git.stage(['.gitattributes']);
+    await f.runner.text(['config', 'merge.conflictStyle', 'diff3']);
+    await f.seed('note.md', 'base\n'); await f.git.branch('create', 'other'); await f.seed('note.md', 'theirs\n');
+    await f.git.branch('switch', 'main'); await f.seed('note.md', 'ours\n'); await assert.rejects(f.git.integrate('merge', 'other'));
+    const conflict = await f.git.conflict('note.md'); assert.equal(conflict.markerSize, 9); assert.equal(conflict.blocks.length, 1);
+    assert.equal(conflict.blocks[0].ours, 'ours\n'); assert.equal(conflict.blocks[0].base, 'base\n');
+    const work = await readFile(join(f.root, 'note.md')), stages = await f.runner.text(['ls-files', '-u', '--', 'note.md']);
+    for (const result of [conflict.result, 'resolved\n=========\n', '<<<<<<<<< HEAD\nours\n', 'resolved\n>>>>>>>>> other\n']) {
+      await assert.rejects(f.git.resolveConflict('note.md', 'result', result, conflict.result), /冲突标记/);
+      assert.deepEqual(await readFile(join(f.root, 'note.md')), work);
+      assert.equal(await f.runner.text(['ls-files', '-u', '--', 'note.md']), stages);
+    }
+    const block = conflict.blocks[0];
+    await f.git.resolveConflict('note.md', 'result', block.ours + block.theirs, conflict.result);
+    assert.equal((await f.git.file('note.md', INDEX)).text, 'ours\ntheirs\n');
+  } finally { await f.close(); }
+});
+test('parsed empty, worktree and index revisions compare a new file before its first commit', async () => {
+  const f = await fixture(); try {
+    await writeFile(join(f.root, 'new.md'), 'new text\n');
+    const diff = await f.git.diff('new.md', parseRevision(' :empty '), parseRevision(' :worktree '));
+    assert.equal(diff.before.exists, false); assert.equal(diff.after.text, 'new text\n');
+    await f.git.stage(['new.md']);
+    const staged = await f.git.diff('new.md', parseRevision(':empty'), parseRevision(':index'));
+    assert.equal(staged.after.text, 'new text\n'); assert.equal(staged.stageable, 'unstage');
+  } finally { await f.close(); }
+});
+test('conflict resolution keeps a source Markdown underline but rejects an extra leftover separator', async () => {
+  const f = await fixture(); try {
+    const heading = 'Heading\n=======\n';
+    await f.seed('note.md', heading + 'base\n'); await f.git.branch('create', 'other'); await f.seed('note.md', heading + 'theirs\n');
+    await f.git.branch('switch', 'main'); await f.seed('note.md', heading + 'ours\n'); await assert.rejects(f.git.integrate('merge', 'other'));
+    const conflict = await f.git.conflict('note.md');
+    await assert.rejects(f.git.resolveConflict('note.md', 'result', heading + 'resolved\n=======\n', conflict.result), /冲突标记/);
+    await f.git.resolveConflict('note.md', 'result', heading + 'resolved\n', conflict.result);
+    assert.equal((await f.git.file('note.md', INDEX)).text, heading + 'resolved\n');
   } finally { await f.close(); }
 });
 test('rebase conflicts continue; cherry-pick and revert support continuation', async () => {

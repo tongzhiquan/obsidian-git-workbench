@@ -4,7 +4,7 @@ import { resolve, relative, dirname, join, isAbsolute, sep } from 'node:path';
 import { randomUUID, createHash } from 'node:crypto';
 import { createTwoFilesPatch } from 'diff';
 import { GitError, GitRunner } from './runner';
-import { LOG_FORMAT, commitFromFields, parseBlame, parseHistory, parseHunks, parseLog, parseStatus, conflictBlocks } from './parsers';
+import { LOG_FORMAT, commitFromFields, parseBlame, parseHistory, parseHunks, parseLog, parseStatus, conflictBlocks, remainingConflictMarkers } from './parsers';
 import { lineChange } from './line-change';
 import { lineEdits, selectedText } from './line-edits';
 import { EMPTY, HEAD, INDEX, WORKTREE, type BlameLine, type BlameChange, type ChangedFile, type Commit, type Conflict, type FileContent, type FileDiff, type GitRef, type LogFilter, type Operation, type Repository, type RepoStatus, type Revision, type Stash } from '../types';
@@ -416,14 +416,26 @@ export class GitService {
       stages.set(+stage, mode === '120000' || mode === '160000' ? { ...missing(), binary: true, exists: true } : size > MAX_TEXT ? content(Buffer.alloc(0), size) : content(await this.runner.run(['cat-file', 'blob', object])));
     }
     const base = stages.get(1) ?? missing(), ours = stages.get(2) ?? missing(), theirs = stages.get(3) ?? missing();
-    const work = await this.file(path, WORKTREE); const result = work.text;
-    return { path, base, ours, theirs, result, blocks: conflictBlocks(result), fileLevel: [base, ours, theirs].some(f => f.binary || f.large) || !ours.exists || !theirs.exists };
+    const [work, attributes] = await Promise.all([
+      this.file(path, WORKTREE),
+      this.runner.text(['check-attr', '-z', 'conflict-marker-size', '--', path]),
+    ]);
+    const configuredSize = Number(attributes.split('\0')[2]);
+    const markerSize = Number.isSafeInteger(configuredSize) && configuredSize > 0 ? configuredSize : 7;
+    const fileLevel = [base, ours, theirs, work].some(f => f.binary || f.large) || !ours.exists || !theirs.exists || !work.exists;
+    const result = fileLevel ? null : work.text;
+    return { path, base, ours, theirs, result, blocks: result === null ? [] : conflictBlocks(result, markerSize), markerSize, fileLevel };
   }
-  async resolveConflict(path: string, choice: 'ours' | 'theirs' | 'result' | 'delete', text?: string, expected?: string): Promise<void> {
+  async resolveConflict(path: string, choice: 'ours' | 'theirs' | 'result' | 'delete', text?: string | null, expected?: string | null): Promise<void> {
     await this.runner.write(async () => {
       const current = await this.conflict(path);
       if (expected !== undefined && current.result !== expected) throw new Error(t('error.conflictChanged'));
-      if (choice === 'result' && (text === undefined || conflictBlocks(text).length)) throw new Error(t('error.conflictMarkers'));
+      if (choice === 'result') {
+        if (current.fileLevel || current.result === null) throw new Error(t('error.conflictFileLevel'));
+        if (typeof text !== 'string' || text.includes('\0') || Buffer.byteLength(text) > MAX_TEXT) throw new Error(t('error.worktreeTextLimit'));
+        const remaining = remainingConflictMarkers(text, current.markerSize, [current.base.text, current.ours.text, current.theirs.text]);
+        if (remaining.length) throw new Error(t('error.conflictMarkerLines', { p0: remaining.slice(0, 10).join(', ') }));
+      }
       await this.saveSafetyCopy(path, '解决冲突前'); const absolute = await this.writablePath(path);
       if (choice === 'delete' || (choice !== 'result' && !current[choice].exists)) {
         await unlink(absolute).catch(e => { if (e.code !== 'ENOENT') throw e; }); await this.runner.text(['add', '-A', '--', path]);

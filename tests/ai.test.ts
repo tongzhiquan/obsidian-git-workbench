@@ -1,22 +1,70 @@
 import './test-language';
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { aiBaseUrl, buildAiPrompt, extractAiMessage, DEFAULT_AI_MODELS } from '../src/ai-core';
+import { buildAiPrompt, extractAiMessage, normalizeDeepSeekSettings, DEEPSEEK_ENDPOINT, DEFAULT_DEEPSEEK_MODEL, DEFAULT_DEEPSEEK_KEY_ID } from '../src/ai-core';
 import { DEFAULT_SETTINGS } from '../src/types';
 import { DEFAULT_AI_PROMPT, LEGACY_AI_PROMPT, normalizeAiPrompt } from '../src/ai-prompt';
+import { build } from 'esbuild';
+import { runInNewContext } from 'node:vm';
+import type { generateCommitMessage } from '../src/ai';
 
-test('AI provider URLs use the OpenAI-compatible chat completions endpoint', () => {
-  assert.equal(aiBaseUrl({ aiProvider: 'openai', aiBaseUrl: '' }), 'https://api.openai.com/v1/chat/completions');
-  assert.equal(aiBaseUrl({ aiProvider: 'deepseek', aiBaseUrl: '' }), 'https://api.deepseek.com/chat/completions');
-  assert.equal(aiBaseUrl({ aiProvider: 'custom', aiBaseUrl: 'https://llm.example/v1/' }), 'https://llm.example/v1/chat/completions');
+test('DeepSeek is the only provider and uses its official endpoint and current default model', () => {
+  assert.equal(DEEPSEEK_ENDPOINT, 'https://api.deepseek.com/chat/completions');
+  assert.equal(DEFAULT_SETTINGS.aiProvider, 'deepseek');
+  assert.equal(DEFAULT_SETTINGS.aiModel, DEFAULT_DEEPSEEK_MODEL);
+  assert.equal(DEFAULT_DEEPSEEK_MODEL, 'deepseek-flash');
+  assert.equal(DEFAULT_SETTINGS.aiApiKeyId, DEFAULT_DEEPSEEK_KEY_ID);
+  assert.equal('aiBaseUrl' in DEFAULT_SETTINGS, false);
 });
 
-test('AI providers have useful default model names', () => {
-  assert.equal(DEFAULT_AI_MODELS.openai, 'gpt-5-mini');
-  assert.equal(DEFAULT_AI_MODELS.deepseek, 'deepseek-chat');
-  assert.equal(DEFAULT_SETTINGS.aiProvider, 'deepseek');
-  assert.equal(DEFAULT_SETTINGS.aiBaseUrl, 'https://api.deepseek.com');
-  assert.equal(DEFAULT_SETTINGS.aiModel, 'deepseek-chat');
+test('DeepSeek migration preserves its credential reference and custom models while upgrading retired aliases', () => {
+  const saved = { aiProvider: 'deepseek', aiModel: 'deepseek-v4-pro', aiApiKeyId: 'existing-deepseek-secret' };
+  const migrated = normalizeDeepSeekSettings(saved);
+  assert.deepEqual(migrated.settings, saved); assert.equal(migrated.needsApiKey, false);
+  for (const aiModel of ['deepseek-chat', 'deepseek-reasoner', '', '  ']) {
+    const result = normalizeDeepSeekSettings({ ...saved, aiModel });
+    assert.equal(result.settings.aiModel, DEFAULT_DEEPSEEK_MODEL);
+    assert.equal(result.settings.aiApiKeyId, saved.aiApiKeyId);
+  }
+  assert.equal(normalizeDeepSeekSettings({ ...saved, aiApiKeyId: '../invalid' }).settings.aiApiKeyId, DEFAULT_DEEPSEEK_KEY_ID);
+});
+
+test('OpenAI, custom and invalid provider migrations do not reuse their models or secret references', () => {
+  for (const aiProvider of ['openai', 'custom', 'invalid', null]) {
+    const saved = { aiProvider, aiModel: 'old-model', aiApiKeyId: 'old-provider-key', aiBaseUrl: 'https://old.example' };
+    const result = normalizeDeepSeekSettings(saved);
+    assert.equal(result.needsApiKey, true);
+    assert.deepEqual(result.settings, { aiProvider: 'deepseek', aiModel: DEFAULT_DEEPSEEK_MODEL, aiApiKeyId: DEFAULT_DEEPSEEK_KEY_ID });
+    assert.equal(saved.aiApiKeyId, 'old-provider-key');
+  }
+  assert.deepEqual(normalizeDeepSeekSettings().settings, {
+    aiProvider: 'deepseek', aiModel: DEFAULT_DEEPSEEK_MODEL, aiApiKeyId: DEFAULT_DEEPSEEK_KEY_ID,
+  });
+  assert.notEqual(normalizeDeepSeekSettings({ aiProvider: 'custom', aiApiKeyId: DEFAULT_DEEPSEEK_KEY_ID }).settings.aiApiKeyId, DEFAULT_DEEPSEEK_KEY_ID);
+});
+
+test('commit generation sends only to DeepSeek, clips the diff and requires a key before requesting', async () => {
+  const bundle = await build({ entryPoints: ['src/ai.ts'], bundle: true, write: false, format: 'cjs', platform: 'node', plugins: [{
+    name: 'mock-obsidian', setup(plugin) {
+      plugin.onResolve({ filter: /^obsidian$/ }, () => ({ path: 'obsidian', namespace: 'test' }));
+      plugin.onLoad({ filter: /.*/, namespace: 'test' }, () => ({ contents: 'export const requestUrl = globalThis.requestMock;', loader: 'js' }));
+    },
+  }] });
+  const requests: Array<{ url: string; headers: Record<string, string>; body: string }> = [];
+  const module = { exports: {} as { generateCommitMessage: typeof generateCommitMessage } };
+  runInNewContext(bundle.outputFiles[0].text, { module, exports: module.exports, requestMock: async (request: typeof requests[number]) => {
+    requests.push(request); return { status: 200, json: { choices: [{ message: { content: 'fix: generated' } }] } };
+  } });
+  const settings = { ...DEFAULT_SETTINGS, aiMaxDiffChars: 1000, aiPrompt: 'custom prompt' };
+  await assert.rejects(module.exports.generateCommitMessage(settings, '', 'diff'), /DeepSeek API Key/);
+  assert.equal(requests.length, 0);
+  assert.equal(await module.exports.generateCommitMessage(settings, ' example-key ', 'x'.repeat(1200)), 'fix: generated');
+  assert.equal(requests.length, 1); assert.equal(requests[0].url, DEEPSEEK_ENDPOINT);
+  assert.equal(requests[0].headers.Authorization, 'Bearer example-key');
+  const body = JSON.parse(requests[0].body);
+  assert.equal(body.model, DEFAULT_DEEPSEEK_MODEL); assert.equal(body.thinking.type, 'disabled');
+  assert.ok(body.messages[1].content.includes('custom prompt'));
+  assert.ok(body.messages[1].content.includes('x'.repeat(1000))); assert.ok(!body.messages[1].content.includes('x'.repeat(1001)));
 });
 
 test('AI response extraction removes optional code fences', () => {

@@ -1,9 +1,9 @@
 import { initializeLanguage, normalizeLanguageSetting, t } from './i18n';
-import { FileSystemAdapter, FileView, getLanguage, MarkdownView, Menu, Modal, Notice, Platform, Plugin, PluginSettingTab, Setting, TFile, type WorkspaceLeaf } from 'obsidian';
+import { FileSystemAdapter, FileView, getLanguage, MarkdownView, Menu, Modal, Notice, Platform, Plugin, PluginSettingTab, Setting, setIcon, TFile, type WorkspaceLeaf } from 'obsidian';
 import { GitService } from './git/service';
 import { RepositoryController } from './controller';
 import { editorExtensions } from './editor';
-import { DEFAULT_SETTINGS, INDEX, WORKTREE, type Operation, type Revision, type Settings } from './types';
+import { DEFAULT_SETTINGS, INDEX, WORKTREE, parseRevision, type Operation, type Revision, type Settings } from './types';
 import { WorkbenchView, WORKBENCH } from './ui/workbench';
 import { SourceControlView, SOURCE_CONTROL } from './ui/source-control';
 import { button, ConfirmModal, el, PromptModal } from './ui/common';
@@ -14,7 +14,7 @@ import { lstat, stat } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import type { EditTarget, FileContent, PendingEdit } from './types';
 import { generateCommitMessage } from './ai';
-import { DEFAULT_AI_MODELS } from './ai-core';
+import { normalizeDeepSeekSettings } from './ai-core';
 import { normalizeAiPrompt } from './ai-prompt';
 export default class GitWorkbench extends Plugin {
   settings: Settings = { ...DEFAULT_SETTINGS };
@@ -32,8 +32,10 @@ export default class GitWorkbench extends Plugin {
   async onload(): Promise<void> {
     const data = await this.loadData();
     const savedSettings = data && typeof data === 'object' && !Array.isArray(data) && data.settings && typeof data.settings === 'object' && !Array.isArray(data.settings)
-      ? data.settings as Partial<Settings> : undefined;
-    this.settings = { ...DEFAULT_SETTINGS, ...savedSettings };
+      ? data.settings as Partial<Settings> & Record<string, unknown> : undefined;
+    const { aiBaseUrl: legacyAiBaseUrl, ...currentSettings } = savedSettings ?? {};
+    const aiMigration = normalizeDeepSeekSettings(savedSettings);
+    this.settings = { ...DEFAULT_SETTINGS, ...currentSettings, ...aiMigration.settings };
     this.settings.language = normalizeLanguageSetting(this.settings.language);
     initializeLanguage(this.settings.language, getLanguage());
     if (!Platform.isDesktopApp || !(this.app.vault.adapter instanceof FileSystemAdapter)) { new Notice(t('error.desktopOnly')); return; }
@@ -42,16 +44,14 @@ export default class GitWorkbench extends Plugin {
     this.settings.sourceControlVaultOnly = this.settings.sourceControlVaultOnly === true;
     this.settings.allowEditingStagedFiles = this.settings.allowEditingStagedFiles === true;
     if (this.settings.stagingMode !== 'block') this.settings.stagingMode = 'line';
-    if (!['openai', 'deepseek', 'custom'].includes(this.settings.aiProvider)) this.settings.aiProvider = DEFAULT_SETTINGS.aiProvider;
-    this.settings.aiBaseUrl = typeof this.settings.aiBaseUrl === 'string' ? this.settings.aiBaseUrl : DEFAULT_SETTINGS.aiBaseUrl;
-    this.settings.aiModel = typeof this.settings.aiModel === 'string' && this.settings.aiModel.trim() ? this.settings.aiModel : DEFAULT_SETTINGS.aiModel;
-    this.settings.aiApiKeyId = typeof this.settings.aiApiKeyId === 'string' && /^[a-z0-9-]+$/.test(this.settings.aiApiKeyId) ? this.settings.aiApiKeyId : DEFAULT_SETTINGS.aiApiKeyId;
     this.settings.aiPrompt = normalizeAiPrompt(this.settings.aiPrompt);
     this.settings.aiMaxDiffChars = Math.max(1000, Math.min(500000, Number(this.settings.aiMaxDiffChars) || DEFAULT_SETTINGS.aiMaxDiffChars));
     // Preserve legacy data without loading or updating the retired draft records.
     // Editing content is now kept only in the current session until explicitly saved.
     if (data && typeof data === 'object' && !Array.isArray(data)) this.storedData = { ...data };
     this.settings.pageSize = 200; this.settings.intervalMinutes = Math.max(1, Math.min(1440, Number(this.settings.intervalMinutes) || 10));
+    if (legacyAiBaseUrl !== undefined || aiMigration.needsApiKey || savedSettings?.aiModel !== this.settings.aiModel || savedSettings?.aiApiKeyId !== this.settings.aiApiKeyId) await this.persistSettings();
+    if (aiMigration.needsApiKey) new Notice(t('settings.aiMigrated'), 12000);
     this.git = new GitService(this.app.vault.adapter.getBasePath(), this.settings.gitPath);
     this.controller = new RepositoryController(this.git, this.settings, message => new Notice(message, 8000));
     registerGitWorkbenchIcon();
@@ -61,17 +61,12 @@ export default class GitWorkbench extends Plugin {
     this.addCommand({ id: 'open-source-control', name: t('command.openSource'), callback: () => void this.openSourceControl() });
     this.addCommand({ id: 'file-history', name: t('command.history'), callback: () => { const path = this.currentPath(); if (path) void this.openHistory(path); else new Notice(t('command.openNoteFirst')); } });
     this.addCommand({ id: 'file-diff', name: t('command.diff'), callback: () => { const path = this.currentPath(); if (path) void this.openDiff(path, INDEX, WORKTREE); } });
-    this.addCommand({ id: 'compare-refs', name: t('command.compare'), callback: () => this.compareRefs() });
-    this.addCommand({ id: 'stage-file', name: t('command.stage'), callback: () => { const path = this.currentPath(); if (path) void this.run(t('command.stage'), async () => { await this.flushEditors(); await this.git.stage([path]); }); } });
-    this.addCommand({ id: 'unstage-file', name: t('command.unstage'), callback: () => { const path = this.currentPath(); if (path) void this.run(t('source.unstage'), () => this.git.unstage([path])); } });
     this.addCommand({ id: 'commit', name: t('command.commit'), callback: () => new PromptModal(this.app, t('commit.submit'), [{ label: t('command.messageTemplate'), value: this.backupMessage(), multiline: true }], values => this.run(t('commit.submit'), async () => { await this.flushEditors(); await this.git.commit(formatCommitMessage(values[0])); })).open() });
     this.addCommand({ id: 'fill-backup-message', name: t('commit.fillBackup'), callback: () => { void this.openSourceControl().then(view => view.fillBackupMessage()); } });
     this.addCommand({ id: 'generate-commit-message', name: t('command.generateMessage'), callback: () => { void this.openSourceControl().then(view => view.generateAiMessage()); } });
     for (const action of ['fetch', 'pull', 'push'] as const) this.addCommand({ id: action, name: action === 'fetch' ? t('network.fetch') : action === 'pull' ? t('network.pull') : t('network.push'), callback: () => void this.network(action) });
-    this.addCommand({ id: 'sync', name: t('command.sync'), callback: () => void this.run(t('network.sync'), async () => { await this.flushEditors(); await this.git.network('fetch'); await this.git.network('pull'); await this.git.network('push'); }) });
     this.addCommand({ id: 'refresh', name: t('command.refresh'), callback: () => void this.controller.refresh() });
     this.addCommand({ id: 'toggle-blame', name: t('command.toggleBlame'), callback: () => { this.settings.fullBlame = !this.settings.fullBlame; void this.persistSettings(); this.controller.emit(); } });
-    this.addCommand({ id: 'create-branch', name: t('command.createBranch'), callback: () => this.createBranch() });
     this.addSettingTab(new GitWorkbenchSettings(this));
     this.registerEditorExtension(editorExtensions(this));
     this.registerEvent(this.app.vault.on('modify', () => this.controller.scheduleRefresh()));
@@ -224,8 +219,7 @@ export default class GitWorkbench extends Plugin {
   }
   compareRefs(left = 'HEAD', right = ':worktree'): void {
     new PromptModal(this.app, t('command.compare'), [{ label: t('common.repoFilePath'), value: this.currentPath() ?? '' }, { label: t('diff.leftRevision'), value: left }, { label: t('diff.rightRevision'), value: right }], async values => {
-      const revision = (s: string): Revision => s === ':index' ? INDEX : s === ':worktree' ? WORKTREE : { kind: 'commit', ref: s };
-      await this.openDiff(values[0], revision(values[1]), revision(values[2]));
+      await this.openDiff(values[0].trim(), parseRevision(values[1]), parseRevision(values[2]));
     }).open();
   }
   confirmDiscard(paths: string[]): void { new ConfirmModal(this.app, t('discard.title'), t('discard.description', { p0: paths.join('\n') }), () => this.run(t('discard.action'), async () => { await this.flushEditors(); await this.git.discard(paths); })).open(); }
@@ -258,8 +252,14 @@ export default class GitWorkbench extends Plugin {
 }
 class GitWorkbenchSettings extends PluginSettingTab {
   constructor(private plugin: GitWorkbench) { super(plugin.app, plugin); }
+  private addSection(name: string, icon: string, description: string): void {
+    const heading = el(this.containerEl, 'h3', 'gp-settings-heading');
+    const symbol = el(heading, 'span', 'gp-settings-heading-icon'); symbol.setAttribute('aria-hidden', 'true'); setIcon(symbol, icon);
+    el(heading, 'span', '', name);
+    el(this.containerEl, 'p', 'gp-settings-description', description);
+  }
   display(): void {
-    const parent = this.containerEl; parent.replaceChildren(); el(parent, 'h2', '', 'Git Workbench');
+    const parent = this.containerEl; parent.replaceChildren(); parent.addClass('gp-settings'); el(parent, 'h2', 'gp-settings-title', 'Git Workbench');
     new Setting(parent).setName('语言 / Language').setDesc(t('settings.languageHint')).setClass('gp-language-setting').addDropdown(dropdown => dropdown
       .addOption('auto', t('settings.languageAuto')).addOption('zh-CN', '简体中文').addOption('en', 'English')
       .setValue(this.plugin.settings.language).onChange(async value => {
@@ -277,16 +277,7 @@ class GitWorkbenchSettings extends PluginSettingTab {
       if (this.plugin.indexEdits.size) { toggle.setValue(this.plugin.settings.allowEditingStagedFiles); new Notice(t('settings.saveIndexFirst')); return; }
       this.plugin.settings.allowEditingStagedFiles = value; await this.plugin.persistSettings(); this.plugin.controller.invalidate(); this.plugin.controller.emit();
     }));
-    el(parent, 'h3', '', t('settings.aiTitle'));
-    el(parent, 'p', 'gp-muted', t('settings.aiDescription'));
-    new Setting(parent).setName(t('settings.aiProvider')).addDropdown(dropdown => dropdown
-      .addOption('openai', 'OpenAI').addOption('deepseek', 'DeepSeek').addOption('custom', t('settings.aiCustom'))
-      .setValue(this.plugin.settings.aiProvider).onChange(async value => {
-        const provider = value as typeof this.plugin.settings.aiProvider;
-        if (provider !== 'custom' && this.plugin.settings.aiModel === (provider === 'openai' ? DEFAULT_AI_MODELS.deepseek : DEFAULT_AI_MODELS.openai)) this.plugin.settings.aiModel = DEFAULT_AI_MODELS[provider];
-        this.plugin.settings.aiProvider = provider; await this.plugin.persistSettings(); this.display();
-      }));
-    new Setting(parent).setName(t('settings.aiUrl')).setDesc(t('settings.aiUrlHint')).addText(t => t.setValue(this.plugin.settings.aiBaseUrl).onChange(async value => { this.plugin.settings.aiBaseUrl = value.trim(); await this.plugin.persistSettings(); }));
+    this.addSection(t('settings.aiTitle'), 'wand-sparkles', t('settings.aiDescription'));
     new Setting(parent).setName(t('settings.aiModel')).addText(t => t.setValue(this.plugin.settings.aiModel).onChange(async value => { this.plugin.settings.aiModel = value.trim(); await this.plugin.persistSettings(); }));
     new Setting(parent).setName('API Key').setDesc(t('settings.aiKeyHint')).addText(t => { t.inputEl.type = 'password'; t.setValue(this.plugin.aiApiKey()).onChange(value => this.plugin.setAiApiKey(value)); });
     new Setting(parent).setName(t('settings.aiMaxDiff')).setDesc(t('settings.aiMaxDiffHint')).addText(t => t.setValue(String(this.plugin.settings.aiMaxDiffChars)).onChange(async value => { const n = Number(value); if (!Number.isFinite(n) || n < 1000 || n > 500000) return; this.plugin.settings.aiMaxDiffChars = Math.round(n); await this.plugin.persistSettings(); }));
@@ -294,7 +285,7 @@ class GitWorkbenchSettings extends PluginSettingTab {
       field.inputEl.rows = 16; field.inputEl.setAttribute('aria-label', t('settings.aiPromptLabel'));
       field.setValue(this.plugin.settings.aiPrompt).onChange(async value => { this.plugin.settings.aiPrompt = value; await this.plugin.persistSettings(); });
     }).addButton(b => b.setButtonText(t('settings.aiReset')).onClick(async () => { this.plugin.settings.aiPrompt = DEFAULT_SETTINGS.aiPrompt; await this.plugin.persistSettings(); this.display(); }));
-    el(parent, 'h3', '', t('settings.autoBackup')); el(parent, 'p', 'gp-muted', t('settings.backupDescription'));
+    this.addSection(t('settings.autoBackup'), 'archive', t('settings.backupDescription'));
     new Setting(parent).setName(t('settings.enableBackup')).setDesc(t('settings.enableBackupHint')).addToggle(toggle => toggle.setValue(this.plugin.settings.autoBackup).onChange(async value => { this.plugin.settings.autoBackup = value; await this.plugin.persistSettings(); this.plugin.configureAutomation(); this.plugin.controller.emit(); this.display(); }));
     for (const [key, name] of [['autoCommit', t('settings.autoCommit')], ['autoSync', t('settings.autoSync')], ['pullOnStartup', t('settings.pullOnStartup')]] as const) new Setting(parent).setName(name).addToggle(toggle => toggle.setValue(this.plugin.settings[key]).onChange(async value => { this.plugin.settings[key] = value; await this.plugin.persistSettings(); this.plugin.configureAutomation(); }));
     new Setting(parent).setName(t('settings.interval')).addText(t => t.setValue(String(this.plugin.settings.intervalMinutes)).onChange(async value => { const n = Number(value); if (!Number.isFinite(n) || n < 1 || n > 1440) return; this.plugin.settings.intervalMinutes = n; await this.plugin.persistSettings(); this.plugin.configureAutomation(); }));

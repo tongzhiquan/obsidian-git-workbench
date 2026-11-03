@@ -40,7 +40,10 @@ module.exports = async function hoverChecks({ window, js, check, capture }) {
   await js("app.workspace.revealLeaf(window.__qaEditorLeaf)");await delay(650);await hover();const commit=await rect('.gp-blame-card-primary');await click(commit.left+commit.width/2,commit.top+commit.height/2);await delay(450);
   check(await js("app.workspace.getLeavesOfType('git-workbench-workbench')[0].view.tab==='graph'&&!!document.querySelector('.gp-commit-detail h3')"),'card commit action opens attributed commit');
   await js("app.workspace.revealLeaf(window.__qaEditorLeaf)");await delay(650);await hover();await click(body.left+50,body.top+190);check(await count()===0,'outside click closes hovering card');
-  window.setSize(1100,850);await delay(500);await hover();check(await js("(()=>{const r=document.querySelector('.gp-blame-card').getBoundingClientRect();return r.left>=12&&r.right<=innerWidth-12&&r.top>=12&&r.bottom<=innerHeight-12})()"),'card with line diff fits narrow window');await capture('git-workbench-hover-diff-narrow.png');
+  window.setSize(1100,850);await delay(500);
+  for(let attempt=0;attempt<3;attempt++){await hover();if(await count()===1)break;move(body.left+30,body.top+220);await delay(700);}
+  check(await count()===1,'hover card reopens after narrowing the window');
+  check(await js("(()=>{const r=document.querySelector('.gp-blame-card').getBoundingClientRect();return r.left>=12&&r.right<=innerWidth-12&&r.top>=12&&r.bottom<=innerHeight-12})()"),'card with line diff fits narrow window');await capture('git-workbench-hover-diff-narrow.png');
   await js("document.querySelector('.gp-blame-card-close').click()");window.setSize(1600,1000);await delay(400);
   await js("app.workspace.activeLeaf.view.editor.setCursor({line:0,ch:1})");await delay(300);
   await js("(()=>{const c=app.plugins.plugins['git-workbench'].controller;window.__qaLineChange=c.lineChange;c.lineChange=()=>new Promise(r=>{window.__qaResolveDiff=r});const a=document.querySelector('.gp-inline-blame'),r=a.getBoundingClientRect();a.dispatchEvent(new PointerEvent('pointerover',{bubbles:true,clientX:r.left+30,clientY:r.top+5}))})()");

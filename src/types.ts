@@ -1,10 +1,18 @@
 import { t, type LanguageSetting } from './i18n';
 import { DEFAULT_AI_PROMPT } from './ai-prompt';
+import { DEFAULT_DEEPSEEK_MODEL, DEFAULT_DEEPSEEK_KEY_ID } from './ai-core';
 export type Revision = { kind: 'commit'; ref: string } | { kind: 'index' } | { kind: 'worktree' } | { kind: 'empty' };
 export const HEAD: Revision = { kind: 'commit', ref: 'HEAD' };
 export const INDEX: Revision = { kind: 'index' };
 export const WORKTREE: Revision = { kind: 'worktree' };
 export const EMPTY: Revision = { kind: 'empty' };
+export function parseRevision(value: string): Revision {
+  const ref = value.trim();
+  if (ref === ':index') return INDEX;
+  if (ref === ':worktree') return WORKTREE;
+  if (ref === ':empty') return EMPTY;
+  return ref ? { kind: 'commit', ref } : HEAD;
+}
 export type Operation = 'merge' | 'rebase' | 'cherry-pick' | 'revert';
 export interface Repository { root: string; gitDir: string; commonDir: string; vaultPrefix: string; gitVersion: string }
 export interface FileStatus { path: string; oldPath?: string; index: string; worktree: string; conflict: boolean; untracked: boolean; submodule: boolean }
@@ -23,7 +31,7 @@ export interface BlameLine { hash: string; author: string; date: number; subject
 export interface BlameChangeLine { kind: 'add' | 'delete' | 'context'; text: string; line: number; selected: boolean }
 export interface BlameChange { label: string; lines: BlameChangeLine[]; truncated: boolean; notice?: string }
 export interface ConflictBlock { start: number; end: number; ours: string; theirs: string; base: string }
-export interface Conflict { path: string; base: FileContent; ours: FileContent; theirs: FileContent; result: string; blocks: ConflictBlock[]; fileLevel: boolean }
+export interface Conflict { path: string; base: FileContent; ours: FileContent; theirs: FileContent; result: string | null; blocks: ConflictBlock[]; markerSize: number; fileLevel: boolean }
 export interface Stash { ref: string; hash: string; subject: string }
 export interface Settings {
   language: LanguageSetting;
@@ -34,8 +42,7 @@ export interface Settings {
   sourceControlLayout: 'tree' | 'list';
   sourceControlVaultOnly: boolean;
   allowEditingStagedFiles: boolean;
-  aiProvider: 'openai' | 'deepseek' | 'custom';
-  aiBaseUrl: string;
+  aiProvider: 'deepseek';
   aiModel: string;
   aiApiKeyId: string;
   aiPrompt: string;
@@ -51,9 +58,8 @@ export const DEFAULT_SETTINGS: Settings = {
   sourceControlVaultOnly: false,
   allowEditingStagedFiles: false,
   aiProvider: 'deepseek',
-  aiBaseUrl: 'https://api.deepseek.com',
-  aiModel: 'deepseek-chat',
-  aiApiKeyId: 'git-workbench-ai-api-key',
+  aiModel: DEFAULT_DEEPSEEK_MODEL,
+  aiApiKeyId: DEFAULT_DEEPSEEK_KEY_ID,
   aiPrompt: DEFAULT_AI_PROMPT,
   aiMaxDiffChars: 120000,
 };

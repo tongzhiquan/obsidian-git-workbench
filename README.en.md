@@ -37,8 +37,6 @@ Choose **语言 / Language** at the top of the Git Workbench settings:
 
 Save unsaved comparison edits, then reload the plugin or restart Obsidian to apply the change. The current session keeps its original language. Switching language does not translate notes, existing commit messages, or custom templates. AI commit message output follows the prompt independently of the interface language.
 
-Screenshots show the plugin's English interface with sample notes from an isolated demo vault.
-
 ## Source Control
 
 When enabled, the plugin opens Source Control in the right sidebar. Changes are grouped as:
@@ -154,11 +152,11 @@ The workbench supports:
 - Save, inspect, Apply, Pop, and Drop Stash entries, including untracked files.
 - Resolve conflicts by keeping either side or both sides by block, edit the result, then continue or abort the operation.
 
-Deleted files, binary files, and files larger than 2 MiB use file-level conflict handling.
+Deleted files, binary files, and files larger than 2 MiB use file-level conflict handling. This also applies when both side versions fit within the limit but the merged working file exceeds it. Saving checks complete and leftover conflict markers, respects `conflict-marker-size` in `.gitattributes`, and reports the remaining marker line numbers.
 
 ## AI Commit Messages
 
-Choose OpenAI, DeepSeek, or a custom OpenAI-compatible endpoint in settings. Enter the model and API key. The AI button in Source Control reads the current staged diff and fills the commit message field; review or edit it before clicking Commit.
+Enter the model and your DeepSeek API key under DeepSeek Commit Messages in settings. The plugin connects only to the official DeepSeek endpoint and defaults to `deepseek-flash`; see the [DeepSeek API documentation](https://api-docs.deepseek.com/). The AI button in Source Control reads the current staged diff and fills the commit message field; review or edit it before clicking Commit.
 
 - Only the staged diff is sent by default; unstaged working-tree content is excluded.
 - API keys are stored with Obsidian SecretStorage.
@@ -177,11 +175,10 @@ Available commands include:
 
 - Open Git Workbench and Source Control.
 - View history and diffs for the current note.
-- Stage or unstage the current note.
 - Commit staged changes.
-- Fetch, Pull, Push, and Sync.
+- Fill the current-time backup message manually and generate commit messages with DeepSeek.
+- Fetch, Pull, and Push.
 - Refresh the repository and toggle full-document attribution.
-- Create branches, create tags, and manage Stash.
 
 ## Boundaries
 

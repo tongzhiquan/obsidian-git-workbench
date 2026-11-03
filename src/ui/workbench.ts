@@ -2,7 +2,7 @@ import { formatDate, t } from '../i18n';
 import { ItemView, Menu, Notice, Scope, setIcon, type WorkspaceLeaf } from 'obsidian';
 import { EditorView } from '@codemirror/view';
 import type GitWorkbench from '../main';
-import { EMPTY, INDEX, WORKTREE, type Commit, type GitRef, type LogFilter, type Revision } from '../types';
+import { EMPTY, INDEX, WORKTREE, parseRevision, type Commit, type GitRef, type LogFilter, type Revision } from '../types';
 import { layoutGraph, type GraphRow } from '../git/graph';
 import { button, ConfirmModal, date, el, empty, input, message, PromptModal, select, virtualList } from './common';
 import { renderDiff, type DiffRenderer } from './diff';
@@ -220,8 +220,7 @@ export class WorkbenchView extends ItemView {
   private async renderComparison(token: number): Promise<void> {
     const toolbar = el(this.body, 'div', 'gp-filters'); const path = input(toolbar, t('common.repoPath'), this.path || this.plugin.currentPath() || '');
     const left = input(toolbar, t('diff.leftInput'), this.left.kind === 'commit' ? this.left.ref : ':' + this.left.kind); const right = input(toolbar, t('diff.rightInput'), this.right.kind === 'commit' ? this.right.ref : ':' + this.right.kind);
-    const parse = (value: string): Revision => value === ':index' ? INDEX : value === ':worktree' ? WORKTREE : value === ':empty' ? EMPTY : { kind: 'commit', ref: value || 'HEAD' };
-    button(toolbar, t('diff.compare'), async () => { this.path = path.value; this.oldPath = this.path; this.left = parse(left.value); this.right = parse(right.value); await this.render(); });
+    button(toolbar, t('diff.compare'), async () => { this.path = path.value.trim(); this.oldPath = this.path; this.left = parseRevision(left.value); this.right = parseRevision(right.value); await this.render(); });
     if (!this.path) { empty(this.body, t('diff.chooseFile'), t('diff.chooseHint')); return; }
     const pane = el(this.body, 'div', 'gp-diff-pane'); const diff = await this.plugin.controller.diff(this.path, this.left, this.right, this.oldPath || this.path);
     if (token === this.token) {

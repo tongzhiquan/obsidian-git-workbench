@@ -47,7 +47,7 @@ module.exports = async ({ window, js, check, capture }) => {
     const path = p.git.repoPath('语言冲突.md');
     const file = text => ({ exists: true, text, size: text.length, binary: false, large: false });
     const original = p.git.conflict;
-    p.git.conflict = async () => ({ path, base: file('base\n'), ours: file('ours\n'), theirs: file('theirs\n'), result: '<<<<<<< HEAD\nours\n=======\ntheirs\n>>>>>>> topic\n', fileLevel: false, blocks: [] });
+    p.git.conflict = async () => ({ path, base: file('base\n'), ours: file('ours\n'), theirs: file('theirs\n'), result: '<<<<<<< HEAD\nours\n=======\ntheirs\n>>>>>>> topic\n', markerSize: 7, fileLevel: false, blocks: [] });
     try { await p.openConflict(path); } finally { p.git.conflict = original; }
     const result = document.querySelector('.gp-conflict-result');
     result.value = 'manually resolved 中文 content\n'; result.dispatchEvent(new Event('input', { bubbles: true }));
@@ -70,14 +70,14 @@ module.exports = async ({ window, js, check, capture }) => {
     const p = app.plugins.plugins['git-workbench'];
     const view = await p.openWorkbench('graph');
     const tab = app.setting.pluginTabs.find(tab => tab.id === 'git-workbench'); tab.display();
-    return { prompt: p.settings.aiPrompt, command: app.commands.commands['git-workbench:stage-file'].name,
+    return { prompt: p.settings.aiPrompt, command: app.commands.commands['git-workbench:file-history'].name,
       settings: tab.containerEl.querySelector('.gp-language-setting').textContent,
       aiHint: tab.containerEl.querySelector('.gp-ai-prompt .setting-item-description').textContent,
       groups: [...document.querySelectorAll('.gp-group-heading .gp-sc-row-name')].map(node => node.textContent),
       tabs: [...view.contentEl.querySelectorAll('.gp-tabs button')].map(node => node.textContent),
       savedFile: await app.vault.read(app.vault.getAbstractFileByPath('语言比较.md')) };
   });
-  check(english.command.includes('Stage current note') && english.settings.includes('Follow Obsidian') && english.aiHint.includes('independently of the UI language'), 'manual reload localizes commands and settings and explains independent AI output language');
+  check(english.command.includes('current note history') && english.settings.includes('Follow Obsidian') && english.aiHint.includes('language, format, and content'), 'manual reload localizes commands and settings and describes the prompt controls');
   check(english.tabs.includes('Commit Graph') && english.tabs.includes('File History') && english.groups.some(name => name === 'Unstaged') && !english.groups.some(name => /[\u3400-\u9fff]/.test(name)), 'English workbench and source-control groups use actual translated labels');
   check(english.prompt === 'Language QA: keep this 自定义提示词 unchanged.' && english.savedFile.includes('unsaved 语言 draft'), 'manual reload preserves the AI prompt and explicitly saved working content');
 
@@ -117,5 +117,5 @@ module.exports = async ({ window, js, check, capture }) => {
     await app.plugins.disablePlugin('git-workbench'); await app.plugins.enablePlugin('git-workbench');
   });
   await wait(() => document.querySelector('.gp-sc-header strong')?.textContent === '源代码管理', 'Chinese reload');
-  check(await run(() => app.commands.commands['git-workbench:stage-file'].name.includes('暂存当前笔记')), 'switching back to Chinese takes effect after manual reload');
+  check(await run(() => app.commands.commands['git-workbench:file-history'].name.includes('当前笔记历史')), 'switching back to Chinese takes effect after manual reload');
 };
