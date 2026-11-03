@@ -1,3 +1,4 @@
+import { formatDate, t } from './i18n';
 import { editorInfoField } from 'obsidian';
 import { StateEffect, type Extension } from '@codemirror/state';
 import { Decoration, EditorView, GutterMarker, ViewPlugin, WidgetType, gutter, type DecorationSet, type ViewUpdate } from '@codemirror/view';
@@ -18,7 +19,7 @@ class BlameWidget extends WidgetType {
 class ChangeMarker extends GutterMarker {
   constructor(public kind: string) { super(); }
   eq(other: GutterMarker): boolean { return other instanceof ChangeMarker && other.kind === this.kind; }
-  toDOM(): HTMLElement { const span = document.createElement('span'); span.className = 'gp-gutter-mark gp-gutter-' + this.kind; span.title = this.kind === 'add' ? '新增行' : this.kind === 'delete' ? '此处删除了行' : '修改行'; return span; }
+  toDOM(): HTMLElement { const span = document.createElement('span'); span.className = 'gp-gutter-mark gp-gutter-' + this.kind; span.title = this.kind === 'add' ? t('blame.addedLine') : this.kind === 'delete' ? t('blame.deletedLine') : t('blame.modifiedLine'); return span; }
 }
 export function editorExtensions(plugin: GitWorkbench): Extension {
   const feature = ViewPlugin.fromClass(class {
@@ -107,7 +108,7 @@ export function editorExtensions(plugin: GitWorkbench): Extension {
           for (let n = first; n <= last; n++) {
             if (!plugin.settings.fullBlame && n !== current) continue;
             const line = this.view.state.doc.line(n); const blame = this.blame[n - 1]; if (!blame) continue;
-            const label = blame.uncommitted ? '未提交的修改' : `${blame.author} · ${new Date(blame.date).toLocaleDateString()} · ${blame.subject}`;
+            const label = blame.uncommitted ? t('blame.uncommitted') : `${blame.author} · ${formatDate(blame.date)} · ${blame.subject}`;
             ranges.push(Decoration.widget({ widget: new BlameWidget(label, n, blame.hash), side: 1 }).range(line.to));
           }
         }

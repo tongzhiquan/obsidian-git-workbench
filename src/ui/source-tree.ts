@@ -1,3 +1,4 @@
+import { t } from '../i18n';
 import type { FileStatus } from '../types';
 import { statusPaths } from '../git/status-paths';
 
@@ -31,10 +32,10 @@ export function sourcePaths(files: FileStatus[], prefix: string, vaultOnly: bool
 export function sourceRows(files: FileStatus[], layout: 'tree' | 'list', collapsed: ReadonlySet<string>): SourceRow[] {
   const rows: SourceRow[] = [];
   const groups: [SourceGroup, string, FileStatus[]][] = [
-    ['conflict', '冲突', files.filter(f => f.conflict)],
-    ['index', '已暂存', files.filter(f => !f.conflict && !f.untracked && f.index !== '.')],
-    ['worktree', '未暂存', files.filter(f => !f.conflict && !f.untracked && f.worktree !== '.')],
-    ['untracked', '未跟踪', files.filter(f => f.untracked)],
+    ['conflict', t('source.conflicts'), files.filter(f => f.conflict)],
+    ['index', t('source.staged'), files.filter(f => !f.conflict && !f.untracked && f.index !== '.')],
+    ['worktree', t('source.unstaged'), files.filter(f => !f.conflict && !f.untracked && f.worktree !== '.')],
+    ['untracked', t('source.untracked'), files.filter(f => f.untracked)],
   ];
   for (const [type, title, group] of groups) {
     if (!group.length) continue;

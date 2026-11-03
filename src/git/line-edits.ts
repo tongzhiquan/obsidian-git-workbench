@@ -1,3 +1,4 @@
+import { t } from '../i18n';
 import { diffArrays } from 'diff';
 
 export interface LineEdit {
@@ -45,7 +46,7 @@ export function lineEdits(before: string, after: string): LineEdits | undefined 
 }
 
 export function selectedText(model: LineEdits, ids: readonly number[], reverse = false): string {
-  if (!ids.length || new Set(ids).size !== ids.length || ids.some(id => !Number.isInteger(id) || !model.edits[id])) throw new Error('请选择有效的修改行');
+  if (!ids.length || new Set(ids).size !== ids.length || ids.some(id => !Number.isInteger(id) || !model.edits[id])) throw new Error(t('error.invalidLines'));
   const result = [...(reverse ? model.after : model.before)];
   const baseText = result.join(''), otherText = (reverse ? model.before : model.after).join('');
   const eol = (baseText || otherText).includes('\r\n') ? '\r\n' : '\n';

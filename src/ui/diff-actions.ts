@@ -1,3 +1,4 @@
+import { t } from '../i18n';
 import { Prec, StateEffect, type Extension } from '@codemirror/state';
 import { Decoration, EditorView, GutterMarker, ViewPlugin, gutter, lineNumbers, type DecorationSet } from '@codemirror/view';
 import { getChunks, getOriginalDoc } from '@codemirror/merge';
@@ -27,8 +28,8 @@ class ActionsMarker extends GutterMarker {
       if (edit && actions.length) {
         row.classList.toggle('is-selected', this.owner.selected.has(edit.id));
         for (const action of actions) {
-          const actionLabel = action === 'stage' ? (ids ? '暂存此修改块' : '暂存此处修改') : action === 'restore' ? (ids ? '还原此修改块' : '还原此处修改') : (ids ? '取消暂存此修改块' : '取消暂存此处修改');
-          const label = ids && block ? `${actionLabel}（${this.owner.blockRangeLabel(block)}）` : actionLabel;
+          const actionLabel = action === 'stage' ? (ids ? t('line.stageBlock') : t('line.stage')) : action === 'restore' ? (ids ? t('line.restoreBlock') : t('line.restore')) : (ids ? t('line.unstageBlock') : t('line.unstage'));
+          const label = ids && block ? t('line.blockAction', { p0: actionLabel, p1: this.owner.blockRangeLabel(block) }) : actionLabel;
           const control = button(row, '', () => this.owner.invoke(action, ids ?? [edit.id]), 'gp-line-action gp-' + (ids ? 'block' : 'line') + '-' + action);
           control.dataset.lineEdit = String(edit.id); control.dataset.beforeLine = String(edit.beforeIndex + 1); control.dataset.afterLine = String(edit.afterIndex + 1);
           if (ids && block) {
@@ -66,10 +67,9 @@ export class DiffLineActions {
     this.mode = mode; this.activeBlock = undefined; this.selected.clear(); this.last = undefined; this.refresh();
   }
   blockRangeLabel(block: LineBlock): string {
-    const range = (side: string, start: number, count: number, empty: string) => count
-      ? `${side}第 ${start + 1} 至 ${start + count} 行`
-      : `${side}无修改行（${empty}第 ${start + 1} 行）`;
-    return `${range('左侧', block.beforeIndex, block.beforeCount, '插入点')} → ${range('右侧', block.afterIndex, block.afterCount, '删除点')}`;
+    const left = block.beforeCount ? t('line.leftRange', { p0: block.beforeIndex + 1, p1: block.beforeIndex + block.beforeCount }) : t('line.leftEmpty', { p0: block.beforeIndex + 1 });
+    const right = block.afterCount ? t('line.rightRange', { p0: block.afterIndex + 1, p1: block.afterIndex + block.afterCount }) : t('line.rightEmpty', { p0: block.afterIndex + 1 });
+    return `${left} → ${right}`;
   }
   setActiveBlock(id?: number, clearIf?: number): void {
     if (clearIf !== undefined && this.activeBlock !== clearIf) return;
@@ -253,8 +253,8 @@ export class DiffLineActions {
   }
   private menuItems(add: (title: string, action: () => unknown) => unknown): void {
     const ids = [...this.selected];
-    if (this.stageable === 'stage') add('还原所选修改', () => this.invoke('restore', ids));
-    add(this.stageable === 'stage' ? '暂存所选修改' : '取消暂存所选修改', () => this.invoke(this.stageable!, ids));
+    if (this.stageable === 'stage') add(t('line.restoreSelected'), () => this.invoke('restore', ids));
+    add(this.stageable === 'stage' ? t('diff.stageSelected') : t('diff.unstageSelected'), () => this.invoke(this.stageable!, ids));
   }
   syncDisabled(): void { const next = this.blocked(); if (this.disabled !== next) { this.disabled = next; this.refresh(); } }
   replaceModel(model?: LineEdits): void {
@@ -266,8 +266,8 @@ export class DiffLineActions {
     if (!this.alive) return;
     this.bar.replaceChildren(); this.bar.hidden = this.selected.size === 0;
     if (this.selected.size) {
-      el(this.bar, 'span', 'gp-muted', `已选 ${this.selected.size} 处修改`);
-      button(this.bar, '清除', () => { this.selected.clear(); this.refresh(); });
+      el(this.bar, 'span', 'gp-muted', t('line.selectedCount', { p0: this.selected.size }));
+      button(this.bar, t('common.clear'), () => { this.selected.clear(); this.refresh(); });
       this.menuItems((title, action) => { button(this.bar, title, action).disabled = this.disabled; });
     }
     for (const view of this.views) view.dispatch({ effects: refreshActions.of() });

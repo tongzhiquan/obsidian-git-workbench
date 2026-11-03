@@ -1,3 +1,4 @@
+import { formatDateTime, t } from '../i18n';
 import { setIcon } from 'obsidian';
 import type { BlameLine, BlameChange } from '../types';
 import { popoverPosition, type Point } from './popover-position';
@@ -93,29 +94,29 @@ export class BlamePopover {
     this.target = target; this.overTrigger = true; activeCards.set(this.doc, this);
     const { blame, path } = target;
     const card = this.node(this.doc.body, 'div', 'gp-blame-card'); this.popup = card;
-    card.id = this.id; card.setAttribute('role', 'dialog'); card.setAttribute('aria-label', blame.uncommitted ? '此行尚未提交' : '此行的提交信息');
+    card.id = this.id; card.setAttribute('role', 'dialog'); card.setAttribute('aria-label', blame.uncommitted ? t('blame.uncommittedLine') : t('blame.commitInfo'));
     target.element.setAttribute('aria-describedby', this.id);
     const header = this.node(card, 'div', 'gp-blame-card-header');
     const author = this.node(header, 'div', 'gp-blame-card-author');
     this.node(author, 'span', 'gp-blame-card-avatar', blame.uncommitted ? '·' : Array.from(blame.author)[0] ?? '?');
-    this.node(author, 'strong', '', blame.uncommitted ? '未提交的修改' : blame.author);
+    this.node(author, 'strong', '', blame.uncommitted ? t('blame.uncommitted') : blame.author);
     const controls = this.node(header, 'div', 'gp-blame-card-controls');
-    const closeButton = this.action(controls, '', 'x', () => this.close(true), 'gp-blame-card-close'); closeButton.setAttribute('aria-label', '关闭卡片');
-    if (!blame.uncommitted) this.node(card, 'div', 'gp-blame-card-date', new Date(blame.date).toLocaleString());
-    this.node(card, 'div', 'gp-blame-card-subject', blame.uncommitted ? '此行内容已修改，还没有对应的提交。' : blame.subject);
-    this.node(card, 'div', 'gp-blame-card-context', `${path} · 第 ${blame.line} 行`);
-    const preview = this.node(card, 'section', 'gp-blame-card-diff'); preview.setAttribute('aria-label', '此行变更');
-    this.node(preview, 'div', 'gp-blame-card-diff-heading', '此行变更');
-    this.node(preview, 'div', 'gp-blame-card-diff-loading', '正在读取行差异…'); preview.setAttribute('aria-busy', 'true');
+    const closeButton = this.action(controls, '', 'x', () => this.close(true), 'gp-blame-card-close'); closeButton.setAttribute('aria-label', t('blame.close'));
+    if (!blame.uncommitted) this.node(card, 'div', 'gp-blame-card-date', formatDateTime(blame.date));
+    this.node(card, 'div', 'gp-blame-card-subject', blame.uncommitted ? t('blame.uncommittedDescription') : blame.subject);
+    this.node(card, 'div', 'gp-blame-card-context', t('blame.context', { p0: path, p1: blame.line }));
+    const preview = this.node(card, 'section', 'gp-blame-card-diff'); preview.setAttribute('aria-label', t('blame.lineChanges'));
+    this.node(preview, 'div', 'gp-blame-card-diff-heading', t('blame.lineChanges'));
+    this.node(preview, 'div', 'gp-blame-card-diff-loading', t('blame.loading')); preview.setAttribute('aria-busy', 'true');
     const actions = this.node(card, 'div', 'gp-blame-card-actions');
-    const commit = this.action(actions, '查看提交', 'git-commit-horizontal', async () => { await this.host.openCommit(blame.hash); this.close(); }, 'gp-blame-card-primary'); commit.disabled = blame.uncommitted;
-    this.action(actions, '文件历史', 'history', async () => { await this.host.openHistory(path); this.close(); }, 'gp-blame-card-history');
+    const commit = this.action(actions, t('blame.viewCommit'), 'git-commit-horizontal', async () => { await this.host.openCommit(blame.hash); this.close(); }, 'gp-blame-card-primary'); commit.disabled = blame.uncommitted;
+    this.action(actions, t('blame.fileHistory'), 'history', async () => { await this.host.openHistory(path); this.close(); }, 'gp-blame-card-history');
     if (!blame.uncommitted) {
       const copy = this.action(actions, blame.hash.slice(0, 7), 'copy', async () => {
         await this.doc.defaultView!.navigator.clipboard.writeText(blame.hash);
         if (!card.isConnected) return;
-        const feedback = card.querySelector<HTMLElement>('.gp-blame-card-feedback')!; feedback.hidden = false; feedback.textContent = '已复制完整 SHA';
-      }, 'gp-blame-card-copy'); copy.setAttribute('aria-label', `复制完整提交 SHA：${blame.hash}`);
+        const feedback = card.querySelector<HTMLElement>('.gp-blame-card-feedback')!; feedback.hidden = false; feedback.textContent = t('blame.copied');
+      }, 'gp-blame-card-copy'); copy.setAttribute('aria-label', t('blame.copySha', { p0: blame.hash }));
     }
     const feedback = this.node(card, 'div', 'gp-blame-card-feedback'); feedback.setAttribute('aria-live', 'polite'); feedback.hidden = true;
     const win = this.doc.defaultView!;
@@ -141,7 +142,7 @@ export class BlamePopover {
     try {
       const change = await this.host.controller.lineChange(target.path, target.blame, target.contents());
       if (this.popup !== card || !card.isConnected) return;
-      preview.replaceChildren(); this.node(preview, 'div', 'gp-blame-card-diff-heading', '此行变更');
+      preview.replaceChildren(); this.node(preview, 'div', 'gp-blame-card-diff-heading', t('blame.lineChanges'));
       this.node(preview, 'div', 'gp-blame-card-diff-label', change.label);
       const lines = this.node(preview, 'div', 'gp-blame-card-diff-lines');
       for (const row of change.lines) {
@@ -150,10 +151,10 @@ export class BlamePopover {
         this.node(entry, 'span', 'gp-blame-change-sign', prefix).setAttribute('aria-hidden', 'true');
         this.node(entry, 'span', 'gp-blame-change-number', String(row.line));
         this.node(entry, 'code', 'gp-blame-change-text', row.text || ' ');
-        entry.setAttribute('aria-label', `${row.kind === 'delete' ? '删除' : row.kind === 'add' ? '新增' : '未变化'}，第 ${row.line} 行${row.selected ? '，当前行' : ''}：${row.text}`);
+        entry.setAttribute('aria-label', t(row.selected ? "blame.currentRowLabel" : "blame.normalRowLabel", { p0: row.kind === 'delete' ? t('common.delete') : row.kind === 'add' ? t('common.added') : t('blame.unchanged'), p1: row.line, p2: row.text }));
       }
       if (change.notice) this.node(lines, 'div', 'gp-blame-card-diff-notice', change.notice);
-      if (change.truncated) this.node(lines, 'div', 'gp-blame-card-diff-notice', '已省略部分内容，可查看提交详情');
+      if (change.truncated) this.node(lines, 'div', 'gp-blame-card-diff-notice', t('blame.truncated'));
       const current = lines.querySelector<HTMLElement>('.is-current');
       if (current) {
         const rowBounds = current.getBoundingClientRect(), listBounds = lines.getBoundingClientRect();
@@ -161,8 +162,8 @@ export class BlamePopover {
       }
     } catch {
       if (this.popup !== card || !card.isConnected) return;
-      preview.replaceChildren(); this.node(preview, 'div', 'gp-blame-card-diff-heading', '此行变更');
-      this.node(preview, 'div', 'gp-blame-card-diff-notice', '无法读取行差异，仍可查看提交或文件历史');
+      preview.replaceChildren(); this.node(preview, 'div', 'gp-blame-card-diff-heading', t('blame.lineChanges'));
+      this.node(preview, 'div', 'gp-blame-card-diff-notice', t('blame.readFailed'));
     } finally { if (this.popup === card) preview.setAttribute('aria-busy', 'false'); }
   }
   close(restoreFocus = false): void {

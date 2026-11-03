@@ -1,3 +1,4 @@
+import { t, type LanguageSetting } from './i18n';
 import { DEFAULT_AI_PROMPT } from './ai-prompt';
 export type Revision = { kind: 'commit'; ref: string } | { kind: 'index' } | { kind: 'worktree' } | { kind: 'empty' };
 export const HEAD: Revision = { kind: 'commit', ref: 'HEAD' };
@@ -25,6 +26,7 @@ export interface ConflictBlock { start: number; end: number; ours: string; their
 export interface Conflict { path: string; base: FileContent; ours: FileContent; theirs: FileContent; result: string; blocks: ConflictBlock[]; fileLevel: boolean }
 export interface Stash { ref: string; hash: string; subject: string }
 export interface Settings {
+  language: LanguageSetting;
   version: 1; gitPath: string; inlineBlame: boolean; fullBlame: boolean; gutter: boolean;
   diffMode: 'split' | 'unified'; pageSize: number; autoBackup: boolean; autoCommit: boolean; autoSync: boolean;
   stagingMode: StagingMode;
@@ -40,6 +42,7 @@ export interface Settings {
   aiMaxDiffChars: number;
 }
 export const DEFAULT_SETTINGS: Settings = {
+  language: 'auto',
   version: 1, gitPath: 'git', inlineBlame: true, fullBlame: false, gutter: true,
   diffMode: 'split', pageSize: 200, autoBackup: false, autoCommit: false, autoSync: false,
   stagingMode: 'line',
@@ -55,5 +58,5 @@ export const DEFAULT_SETTINGS: Settings = {
   aiMaxDiffChars: 120000,
 };
 export function revisionLabel(ref: Revision): string {
-  return ref.kind === 'commit' ? ref.ref.slice(0, 12) : ({ index: '暂存区', worktree: '工作区', empty: '空版本' })[ref.kind];
+  return ref.kind === 'commit' ? ref.ref.slice(0, 12) : ({ index: t('revision.index'), worktree: t('revision.worktree'), empty: t('revision.empty') })[ref.kind];
 }

@@ -1,10 +1,11 @@
+import { t } from '../i18n';
 export function statusLabel(status: string, context?: 'conflict' | 'untracked'): { letter: string; kind: string; label: string } {
-  if (context === 'conflict') return { letter: 'U', kind: 'conflict', label: '存在冲突（未合并）' };
-  if (context === 'untracked' || status === '?') return { letter: 'U', kind: 'untracked', label: '未跟踪（尚未加入 Git）' };
+  if (context === 'conflict') return { letter: 'U', kind: 'conflict', label: t('status.conflict') };
+  if (context === 'untracked' || status === '?') return { letter: 'U', kind: 'untracked', label: t('status.untracked') };
   const labels: Record<string, [string, string]> = {
-    A: ['added', '新增'], M: ['modified', '修改'], D: ['deleted', '删除'], R: ['renamed', '重命名'],
-    C: ['copied', '复制'], T: ['modified', '文件类型变化'], U: ['conflict', '存在冲突（未合并）'],
+    A: ['added', t('common.added')], M: ['modified', t('common.modified')], D: ['deleted', t('common.delete')], R: ['renamed', t('common.renamed')],
+    C: ['copied', t('common.copy')], T: ['modified', t('status.typeChanged')], U: ['conflict', t('status.conflict')],
   };
   const letter = status[0] ?? '?', entry = labels[letter];
-  return { letter, kind: entry?.[0] ?? 'unknown', label: entry?.[1] ?? '其他变化' };
+  return { letter, kind: entry?.[0] ?? 'unknown', label: entry?.[1] ?? t('status.other') };
 }

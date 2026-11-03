@@ -1,3 +1,4 @@
+import './test-language';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { lineChange } from '../src/git/line-change';

@@ -1,3 +1,4 @@
+import { t } from './i18n';
 import { GitService } from './git/service';
 import { statusPaths } from './git/status-paths';
 import { formatCommitMessage } from './commit-message';
@@ -45,9 +46,9 @@ export class RepositoryController {
   }
   scheduleRefresh(): void { clearTimeout(this.timer); this.timer = setTimeout(() => void this.refresh(), 600); }
   async run<T>(label: string, work: () => Promise<T>): Promise<T | undefined> {
-    if (this.busy) { this.notice('已有 Git 操作正在执行'); return undefined; }
+    if (this.busy) { this.notice(t('controller.busy')); return undefined; }
     this.busy = true; this.message = label; this.error = ''; this.emit();
-    try { const result = await work(); this.notice(`${label}完成`); return result; }
+    try { const result = await work(); this.notice(t('controller.completed', { p0: label })); return result; }
     catch (e) { this.error = e instanceof Error ? e.message : String(e); this.notice(this.error); }
     finally { const failure = this.error; await this.refresh(); this.error = failure || this.error; this.busy = false; this.message = ''; this.emit(); }
   }
@@ -74,10 +75,10 @@ export class RepositoryController {
   async automation(flush: () => Promise<void>): Promise<void> {
     if (this.busy || this.automationPaused || !this.git.repo || !this.settings.autoBackup || (!this.settings.autoCommit && !this.settings.autoSync)) return;
     let failed = false;
-    await this.run('自动备份', async () => {
+    await this.run(t('settings.autoBackup'), async () => {
       try {
         await flush(); const status = await this.git.status();
-        if (status.operation || status.files.some(f => f.conflict)) throw new Error('仓库有未完成操作或冲突，自动备份已暂停');
+        if (status.operation || status.files.some(f => f.conflict)) throw new Error(t('controller.backupConflicts'));
         if (status.files.length) {
           await this.git.stage(statusPaths(status.files, 'worktree'));
           await this.git.commit(formatCommitMessage(this.settings.commitTemplate));
@@ -85,7 +86,7 @@ export class RepositoryController {
         if (this.settings.autoSync) { await this.git.network('fetch'); await this.git.network('pull'); await this.git.network('push'); }
       } catch (e) { failed = true; throw e; }
     });
-    if (failed) { this.automationPaused = true; this.emit(); this.notice('自动备份已暂停，在设置中检查原因并恢复'); }
+    if (failed) { this.automationPaused = true; this.emit(); this.notice(t('controller.backupPaused')); }
   }
   dispose(): void { this.alive = false; clearTimeout(this.timer); this.listeners.clear(); this.historyCache.clear(); this.blameCache.clear(); this.diffCache.clear(); this.lineChangeCache.clear(); this.git.dispose(); }
 }

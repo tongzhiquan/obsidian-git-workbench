@@ -1,3 +1,4 @@
+import { formatDateTime, t } from '../i18n';
 import { App, Modal, Notice } from 'obsidian';
 export function el<K extends keyof HTMLElementTagNameMap>(parent: HTMLElement, tag: K, className = '', text?: string): HTMLElementTagNameMap[K] {
   const node = document.createElement(tag); if (className) node.className = className; if (text !== undefined) node.textContent = text; parent.appendChild(node); return node;
@@ -10,7 +11,7 @@ export function select(parent: HTMLElement, options: [string, string][], value: 
   const s = el(parent, 'select'); options.forEach(([key, label]) => { const o = el(s, 'option', '', label); o.value = key; }); s.value = value; s.onchange = () => change(s.value); return s;
 }
 export function empty(parent: HTMLElement, title: string, detail = ''): void { const box = el(parent, 'div', 'gp-empty'); el(box, 'div', 'gp-empty-icon', '◇'); el(box, 'h3', '', title); if (detail) el(box, 'p', 'gp-muted', detail); }
-export function date(value: string | number): string { return new Date(value).toLocaleString(); }
+export function date(value: string | number): string { return formatDateTime(value); }
 export function message(error: unknown): string { return error instanceof Error ? error.message : String(error); }
 export class PromptModal extends Modal {
   constructor(app: App, private title: string, private fields: { label: string; value?: string; multiline?: boolean }[], private submit: (values: string[]) => Promise<unknown> | unknown) { super(app); }
@@ -19,16 +20,16 @@ export class PromptModal extends Modal {
       const label = el(this.contentEl, 'label', 'gp-field'); el(label, 'span', '', field.label);
       const node = field.multiline ? el(label, 'textarea') : el(label, 'input'); node.value = field.value ?? ''; return node;
     });
-    const footer = el(this.contentEl, 'div', 'gp-actions'); button(footer, '取消', () => this.close());
-    button(footer, '确定', async () => { await this.submit(controls.map(c => c.value)); this.close(); }, 'mod-cta');
+    const footer = el(this.contentEl, 'div', 'gp-actions'); button(footer, t('common.cancel'), () => this.close());
+    button(footer, t('common.ok'), async () => { await this.submit(controls.map(c => c.value)); this.close(); }, 'mod-cta');
     controls[0]?.focus();
   }
 }
 export class ConfirmModal extends Modal {
-  constructor(app: App, private title: string, private detail: string, private submit: () => Promise<unknown> | unknown, private accept = '确认') { super(app); }
+  constructor(app: App, private title: string, private detail: string, private submit: () => Promise<unknown> | unknown, private accept = t('common.confirm')) { super(app); }
   onOpen(): void {
     this.titleEl.textContent = this.title; el(this.contentEl, 'p', 'gp-confirm-detail', this.detail);
-    const footer = el(this.contentEl, 'div', 'gp-actions'); button(footer, '取消', () => this.close());
+    const footer = el(this.contentEl, 'div', 'gp-actions'); button(footer, t('common.cancel'), () => this.close());
     button(footer, this.accept, async () => { await this.submit(); this.close(); }, 'mod-warning');
   }
 }

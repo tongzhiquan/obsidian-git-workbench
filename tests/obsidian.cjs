@@ -27,6 +27,7 @@ fs.copyFileSync(path.join(profile, 'obsidian.json'), path.join(profile, 'gitwork
 fs.writeFileSync(path.join(vault, '.obsidian/app.json'), JSON.stringify({ vimMode: false }));
 fs.writeFileSync(path.join(vault, '.obsidian/community-plugins.json'), '["git-workbench"]');
 for (const name of ['main.js', 'manifest.json', 'styles.css']) fs.copyFileSync(path.join(root, 'dist', name), path.join(pluginDir, name));
+fs.writeFileSync(path.join(pluginDir, 'data.json'), JSON.stringify({ settings: { language: 'zh-CN' } }));
 fs.writeFileSync(path.join(repo, '.gitignore'), '笔记库/.obsidian/\n');
 git('init', '--initial-branch=main'); git('config', 'user.name', 'Git Workbench QA'); git('config', 'user.email', 'qa@example.com'); git('config', 'core.autocrlf', 'false');
 fs.writeFileSync(path.join(vault, '项目笔记.md'), '# Git Workbench\n\n一篇用来验证版本历史的笔记。\n\n## 任务\n\n- 提交图\n- 笔记历史\n- 版本比较\n');
@@ -67,6 +68,13 @@ app.on('browser-window-created', (_event, window) => {
       const startup = await js("({source:!!document.querySelector('.gp-source-control'),side:app.workspace.getLeavesOfType('git-workbench-source-control')[0]?.getRoot()===app.workspace.rightSplit,workbench:app.workspace.getLeavesOfType('git-workbench-workbench').length})");
       check(startup.source && startup.side && startup.workbench===0, 'source control opens automatically in right sidebar without opening workbench');
       await require('./settings.cjs')({ js, check });
+      if (process.env.GIT_WORKBENCH_QA_LANGUAGE_ONLY === '1') {
+        window.removeAllListeners('show'); window.setSize(1600, 1000); window.show(); window.focus();
+        await require('./language.cjs')({ window, js, check, capture });
+        check(!consoleErrors.some(e => /git-workbench|CodeMirror.*crash|RangeError|TypeError/.test(e)), 'no language-switch runtime exceptions');
+        await fsp.writeFile(path.join(root, '.qa', 'language-results.json'), JSON.stringify({ qaRoot, results, consoleErrors }, null, 2));
+        clearTimeout(timeout); app.exit(0); return;
+      }
       if (process.env.GIT_WORKBENCH_QA_SOURCE_CONTROL_ONLY === '1') {
         window.removeAllListeners('show'); window.setSize(1600, 1000); window.show(); window.focus();
         await js("(async()=>{const p=app.plugins.plugins['git-workbench'];await p.openWorkbench();await p.openSourceControl()})()");
@@ -136,6 +144,7 @@ app.on('browser-window-created', (_event, window) => {
       const page = await js("(async()=>{document.querySelector('.gp-list-footer button').click();const v=app.workspace.getLeavesOfType('git-workbench-workbench')[0].view;for(let i=0;i<100&&v.commits.length<400;i++)await new Promise(r=>setTimeout(r,30));return {count:v.commits.length,unique:new Set(v.commits.map(c=>c.hash)).size,dom:document.querySelectorAll('.gp-commit-row').length}})()"); check(page.count===400 && page.unique===400 && page.dom<40, 'graph pagination preserves distinct commits and bounded rendered rows');
       window.setSize(1100, 800); await capture('git-workbench-narrow.png');
       const teardown = await js("(async()=>{await app.workspace.revealLeaf(window.__qaEditorLeaf);await new Promise(r=>setTimeout(r,1200));const a=document.querySelector('.gp-inline-blame'),r=a.getBoundingClientRect();a.dispatchEvent(new PointerEvent('pointerover',{bubbles:true,clientX:r.left+30,clientY:r.top+5}));await new Promise(r=>setTimeout(r,500));const cardBefore=!!document.querySelector('.gp-blame-card');await app.plugins.disablePlugin('git-workbench');await new Promise(r=>setTimeout(r,300));const gone=!app.plugins.plugins['git-workbench']&&!document.querySelector('.gp-change-gutter')&&!document.querySelector('.gp-blame-card');await app.plugins.enablePlugin('git-workbench');for(let i=0;i<100&&!document.querySelector('.gp-source-control');i++)await new Promise(r=>setTimeout(r,30));return {gone,cardBefore,settings:app.plugins.plugins['git-workbench'].settings.diffMode,side:app.workspace.getLeavesOfType('git-workbench-source-control').length}})()"); check(teardown.gone && teardown.cardBefore && teardown.settings==='unified'&&teardown.side===1, 'plugin unload removes editor extension and hover card, reload preserves settings and one sidebar');
+      await require('./language.cjs')({ window, js, check, capture });
       check(!consoleErrors.some(e => /git-workbench|CodeMirror.*crash|RangeError|TypeError/.test(e)), 'no plugin runtime exceptions');
       await fsp.writeFile(path.join(root, '.qa', 'obsidian-results.json'), JSON.stringify({ qaRoot, results, consoleErrors, initial, views, editor, unsaved, resolved }, null, 2));
       clearTimeout(timeout); app.exit(0);

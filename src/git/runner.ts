@@ -1,14 +1,15 @@
+import { t } from '../i18n';
 import { spawn } from 'node:child_process';
 import { open, readFile, unlink } from 'node:fs/promises';
 import { join } from 'node:path';
 export class GitError extends Error {
   constructor(public args: string[], public code: number, public stderr: string, public stdout = '') {
-    const raw = [stderr.trim(), stdout.trim()].filter(Boolean).join('\n') || `Git 命令失败（${code}）：${args[0]}`;
-    const hint = /CONFLICT|unmerged|fix conflicts/i.test(raw) ? '在源代码管理侧栏解决冲突，再继续或中止操作。'
-      : /Authentication failed|could not read Username|Permission denied|could not read from remote repository/i.test(raw) ? '请检查系统 Git 的 SSH agent 或 credential helper，再用“检测连接”重试。'
-      : /index\.lock|another git process/i.test(raw) ? '请等待其他 Git 操作完成后重试。'
-      : /Not possible to fast-forward|non-fast-forward|fetch first/i.test(raw) ? '远程和本地已分叉，请 Fetch 后选择 merge 或 rebase，再推送。'
-      : /unable to auto-detect email|Please tell me who you are/i.test(raw) ? '请配置 git config user.name 和 git config user.email。' : '';
+    const raw = [stderr.trim(), stdout.trim()].filter(Boolean).join('\n') || t('error.gitCommand', { p0: code, p1: args[0] });
+    const hint = /CONFLICT|unmerged|fix conflicts/i.test(raw) ? t('error.conflictHint')
+      : /Authentication failed|could not read Username|Permission denied|could not read from remote repository/i.test(raw) ? t('error.authHint')
+      : /index\.lock|another git process/i.test(raw) ? t('error.lockHint')
+      : /Not possible to fast-forward|non-fast-forward|fetch first/i.test(raw) ? t('error.divergedHint')
+      : /unable to auto-detect email|Please tell me who you are/i.test(raw) ? t('error.identityHint') : '';
     super(raw + (hint ? '\n\n' + hint : '')); this.name = 'GitError';
   }
 }
@@ -19,7 +20,7 @@ export class GitRunner {
   disposed = false;
   constructor(public executable: string, public cwd: string, public commonDir?: string) {}
   async run(args: string[], options: RunOptions = {}): Promise<Buffer> {
-    if (this.disposed) throw new Error('Git Workbench 已卸载');
+    if (this.disposed) throw new Error(t('error.unloaded'));
     return new Promise((resolve, reject) => {
       const child = spawn(this.executable, ['-c', 'core.quotepath=false', '-c', 'color.ui=false', ...args], {
         cwd: this.cwd, windowsHide: true, shell: false,
@@ -28,14 +29,14 @@ export class GitRunner {
       });
       this.children.add(child); const out: Buffer[] = []; const err: Buffer[] = []; let size = 0; let failure: Error | undefined;
       const stop = (error: Error) => { failure = error; child.kill(); };
-      const timer = setTimeout(() => stop(new Error('Git 操作超时，请检查认证、网络或仓库状态')), options.timeout ?? 120000);
-      const abort = () => stop(new Error('Git 操作已取消；请刷新仓库状态'));
+      const timer = setTimeout(() => stop(new Error(t('error.timeout'))), options.timeout ?? 120000);
+      const abort = () => stop(new Error(t('error.cancelled')));
       options.signal?.addEventListener('abort', abort, { once: true });
       if (options.signal?.aborted) abort();
-      const collect = (chunks: Buffer[]) => (chunk: Buffer) => { size += chunk.length; if (size > (options.maxBytes ?? 32 * 1024 * 1024)) stop(new Error('Git 输出超过限制，请缩小查询范围')); else chunks.push(chunk); };
+      const collect = (chunks: Buffer[]) => (chunk: Buffer) => { size += chunk.length; if (size > (options.maxBytes ?? 32 * 1024 * 1024)) stop(new Error(t('error.outputLimit'))); else chunks.push(chunk); };
       child.stdout.on('data', collect(out)); child.stderr.on('data', collect(err));
       child.stdin.on('error', () => {});
-      child.on('error', error => { failure = new Error(`无法执行 Git：${error.message}。请检查设置中的 Git 路径。`); });
+      child.on('error', error => { failure = new Error(t('error.executeGit', { p0: error.message })); });
       child.on('close', code => {
         clearTimeout(timer); options.signal?.removeEventListener('abort', abort); this.children.delete(child);
         if (failure) reject(failure); else if (code !== 0 && !(options.allowed ?? []).includes(code ?? -1)) reject(new GitError(args, code ?? -1, Buffer.concat(err).toString('utf8'), Buffer.concat(out).toString('utf8'))); else resolve(Buffer.concat(out));
@@ -54,7 +55,7 @@ export class GitRunner {
         if ((error as NodeJS.ErrnoException).code === 'EEXIST') {
           const previous = await readFile(lock, 'utf8'); const pid = Number(previous.split(':')[0]);
           let alive = true; try { process.kill(pid, 0); } catch (e) { alive = (e as NodeJS.ErrnoException).code !== 'ESRCH'; }
-          if (alive) throw new Error('另一个 Git Workbench 窗口正在操作此仓库，请稍后重试');
+          if (alive) throw new Error(t('error.otherWindow'));
           await unlink(lock); const handle = await open(lock, 'wx'); await handle.writeFile(token); await handle.close();
         } else throw error;
       }
