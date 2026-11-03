@@ -227,7 +227,7 @@ button.gp-sc-filter.is-active { color: var(--text-accent); background: var(--bac
 .gp-status-renamed { color: var(--gp-git-renamed); }
 .gp-status-copied { color: var(--gp-git-copied); }
 .gp-status-conflict { color: var(--gp-git-conflict); }
-.gp-changed-files .gp-file-link { display: flex; align-items: center; gap: 8px; }
+.gp-changed-files .gp-file-link { display: flex; align-items: center; justify-content: flex-start; gap: 8px; }
 .gp-changed-files .gp-file-link > span:last-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .gp-outside { color: var(--text-faint); font-size: 9px; padding: 1px 3px; background: var(--background-secondary); border-radius: 3px; white-space: nowrap; }
 .gp-statusbar { cursor: pointer; }
